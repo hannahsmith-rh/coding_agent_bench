@@ -16,6 +16,7 @@ class AgentConfig(ABC):
     """Base class for agent configurations. Subclass this to add a new agent."""
 
     name: str
+    version: str | None = None
 
     @abstractmethod
     def configure(self, **kwargs) -> AgentConfigResult:

@@ -48,6 +48,9 @@ def run(
     before_script: Annotated[
         Optional[str], typer.Option(help="Script to run before the job starts. Only available with `--remote`.")
     ] = None,
+    agent_version: Annotated[
+        Optional[str], typer.Option(help="Pin agent to a specific version (overrides agent_versions.toml)")
+    ] = None,
     dry_run: Annotated[
         bool, typer.Option(help="Dry run mode, does not execute the job")
     ] = False,
@@ -96,6 +99,7 @@ def run(
             n_tasks=n_tasks,
             model_max_len=model_max_len,
             job_name=job_name,
+            agent_version=agent_version,
         )
         typer.echo(f"Job command:\n{cmd_to_string(harbor_command)}\n")
 

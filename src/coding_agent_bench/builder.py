@@ -35,6 +35,7 @@ class HarborCommandBuilder:
         task_include_pattern: str = None,
         n_tasks: int = None,
         job_name: str = None,
+        agent_version: str = None,
         **kwargs,
     ) -> list[str]:
         args = []
@@ -42,10 +43,14 @@ class HarborCommandBuilder:
         # Add agent
         args += ["--agent", agent]
 
-        # Pin openclaw to last known working version (2026.7.1+ requires
-        # interactive onboarding that breaks headless/container runs)
-        if agent == "openclaw":
-            args += ["--ak", "version=2026.6.1"]
+        # Pin agent version: "latest" = skip pin, CLI override > class default
+        if agent_version == "latest":
+            version = None
+        else:
+            agent_config = get_agent_config(agent)
+            version = agent_version or agent_config.version
+        if version:
+            args += ["--ak", f"version={version}"]
 
         # Add dataset
         if Path(dataset).exists():
@@ -104,6 +109,7 @@ class HarborCommandBuilder:
         n_tasks: int = None,
         model_max_len: int = 262000,
         job_name: str = "default",
+        agent_version: str = None,
         **kwargs,
     ) -> tuple[list[str], Path]:
         """
@@ -135,6 +141,7 @@ class HarborCommandBuilder:
             task_include_pattern=dataset_pattern,
             n_tasks=n_tasks,
             job_name=job_name,
+            agent_version=agent_version,
         )
 
         job_path = self.jobs_dir / job_name

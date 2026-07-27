@@ -19,6 +19,7 @@ class ClaudeCodeAgentConfig(AgentConfig):
     """Claude Code agent. Configures Anthropic API env vars pointing at the served model."""
 
     name = "claude-code"
+    version = "2.1.220"
 
     def configure(self, **kwargs) -> AgentConfigResult:
         model_name = kwargs["model_name"]
@@ -38,6 +39,7 @@ class CodexAgentConfig(AgentConfig):
     """Codex agent. Generates a config.toml and bind-mounts it into the container."""
 
     name = "codex"
+    version = "0.145.0"
 
     def configure(self, **kwargs) -> AgentConfigResult:
         model_name = kwargs["model_name"]
@@ -66,12 +68,13 @@ class OpenClawAgentConfig(AgentConfig):
     """OpenClaw agent. Configures OpenAI-compatible API env vars."""
 
     name = "openclaw"
+    version = "2026.6.1"
 
     def configure(self, **kwargs) -> AgentConfigResult:
         model_name = kwargs["model_name"]
         server_url = kwargs["server_url"]
         agent_env = {
-            "OPENAI_BASE_URL": server_url.rstrip("/") + "/v1",
+            "OPENAI_BASE_URL": server_url.rstrip("/").removesuffix("/v1") + "/v1",
             "OPENAI_API_KEY": "sk-no-key-required",
         }
         return AgentConfigResult(model="vllm/" + model_name, agent_env=agent_env)
@@ -81,6 +84,7 @@ class OpenCodeAgentConfig(AgentConfig):
     """OpenCode agent. Builds a JSON config with vLLM provider and context/output limits."""
 
     name = "opencode"
+    version = "1.18.1"
 
     def configure(self, **kwargs) -> AgentConfigResult:
         model_name = kwargs["model_name"]
@@ -97,7 +101,7 @@ class OpenCodeAgentConfig(AgentConfig):
                 "vllm": {
                     "npm": "@ai-sdk/openai-compatible",
                     "name": "vLLM",
-                    "options": {"baseURL": server_url.rstrip("/") + "/v1"},
+                    "options": {"baseURL": server_url.rstrip("/").removesuffix("/v1") + "/v1"},
                     "models": {
                         "qwen3.6-35b": {
                             "name": "qwen3.6-35b",
@@ -128,7 +132,7 @@ class OpenHandsSdkAgentConfig(AgentConfig):
         
         # Configure the environment
         model = "hosted_vllm/" + model_name
-        api_base = server_url.rstrip("/") + "/v1"
+        api_base = server_url.rstrip("/").removesuffix("/v1") + "/v1"
 
         agent_env = {
             "HOSTED_VLLM_API_BASE": api_base,
@@ -140,6 +144,7 @@ class PiAgentConfig(AgentConfig):
     """Pi agent. Generates a models.json and bind-mounts it into the container."""
 
     name = "pi"
+    version = "0.73.1"
 
     def configure(self, **kwargs) -> AgentConfigResult:
         model_name = kwargs["model_name"]
@@ -149,7 +154,7 @@ class PiAgentConfig(AgentConfig):
         models_json = {
             "providers": {
                 "vllm": {
-                    "baseUrl": server_url.rstrip("/") + "/v1",
+                    "baseUrl": server_url.rstrip("/").removesuffix("/v1") + "/v1",
                     "api": "openai-completions",
                     "apiKey": "NONE",
                     "models": [
