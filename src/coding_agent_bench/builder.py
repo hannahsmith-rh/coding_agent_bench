@@ -4,17 +4,6 @@ import json
 from enum import Enum
 import os
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
-
-_VERSIONS_PATH = Path(__file__).parent / "agent_versions.toml"
-_AGENT_VERSIONS: dict[str, str] = {}
-if _VERSIONS_PATH.exists():
-    with open(_VERSIONS_PATH, "rb") as _f:
-        _AGENT_VERSIONS = tomllib.load(_f).get("versions", {})
-
 from harbor.models.environment_type import EnvironmentType
 
 from coding_agent_bench.agents import get_agent_config
@@ -54,11 +43,12 @@ class HarborCommandBuilder:
         # Add agent
         args += ["--agent", agent]
 
-        # Pin agent version: "latest" = skip pin, CLI override > agent_versions.toml
+        # Pin agent version: "latest" = skip pin, CLI override > class default
         if agent_version == "latest":
             version = None
         else:
-            version = agent_version or _AGENT_VERSIONS.get(agent)
+            agent_config = get_agent_config(agent)
+            version = agent_version or agent_config.version
         if version:
             args += ["--ak", f"version={version}"]
 

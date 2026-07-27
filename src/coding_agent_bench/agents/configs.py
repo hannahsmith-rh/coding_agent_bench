@@ -19,6 +19,7 @@ class ClaudeCodeAgentConfig(AgentConfig):
     """Claude Code agent. Configures Anthropic API env vars pointing at the served model."""
 
     name = "claude-code"
+    version = "2.1.220"
 
     def configure(self, **kwargs) -> AgentConfigResult:
         model_name = kwargs["model_name"]
@@ -38,6 +39,7 @@ class CodexAgentConfig(AgentConfig):
     """Codex agent. Generates a config.toml and bind-mounts it into the container."""
 
     name = "codex"
+    version = "0.145.0"
 
     def configure(self, **kwargs) -> AgentConfigResult:
         model_name = kwargs["model_name"]
@@ -66,6 +68,7 @@ class OpenClawAgentConfig(AgentConfig):
     """OpenClaw agent. Configures OpenAI-compatible API env vars."""
 
     name = "openclaw"
+    version = "2026.6.1"
 
     def configure(self, **kwargs) -> AgentConfigResult:
         model_name = kwargs["model_name"]
@@ -81,6 +84,7 @@ class OpenCodeAgentConfig(AgentConfig):
     """OpenCode agent. Builds a JSON config with vLLM provider and context/output limits."""
 
     name = "opencode"
+    version = "1.18.1"
 
     def configure(self, **kwargs) -> AgentConfigResult:
         model_name = kwargs["model_name"]
@@ -140,6 +144,7 @@ class PiAgentConfig(AgentConfig):
     """Pi agent. Generates a models.json and bind-mounts it into the container."""
 
     name = "pi"
+    version = "0.73.1"
 
     def configure(self, **kwargs) -> AgentConfigResult:
         model_name = kwargs["model_name"]
