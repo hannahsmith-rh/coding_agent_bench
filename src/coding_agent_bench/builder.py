@@ -4,6 +4,17 @@ import json
 from enum import Enum
 import os
 
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
+_VERSIONS_PATH = Path(__file__).parent / "agent_versions.toml"
+_AGENT_VERSIONS: dict[str, str] = {}
+if _VERSIONS_PATH.exists():
+    with open(_VERSIONS_PATH, "rb") as _f:
+        _AGENT_VERSIONS = tomllib.load(_f).get("versions", {})
+
 from harbor.models.environment_type import EnvironmentType
 
 from coding_agent_bench.agents import get_agent_config
@@ -35,6 +46,7 @@ class HarborCommandBuilder:
         task_include_pattern: str = None,
         n_tasks: int = None,
         job_name: str = None,
+        agent_version: str = None,
         **kwargs,
     ) -> list[str]:
         args = []
@@ -42,10 +54,13 @@ class HarborCommandBuilder:
         # Add agent
         args += ["--agent", agent]
 
-        # Pin openclaw to last known working version (2026.7.1+ requires
-        # interactive onboarding that breaks headless/container runs)
-        if agent == "openclaw":
-            args += ["--ak", "version=2026.6.1"]
+        # Pin agent version: "latest" = skip pin, CLI override > agent_versions.toml
+        if agent_version == "latest":
+            version = None
+        else:
+            version = agent_version or _AGENT_VERSIONS.get(agent)
+        if version:
+            args += ["--ak", f"version={version}"]
 
         # Add dataset
         if Path(dataset).exists():
@@ -104,6 +119,7 @@ class HarborCommandBuilder:
         n_tasks: int = None,
         model_max_len: int = 262000,
         job_name: str = "default",
+        agent_version: str = None,
         **kwargs,
     ) -> tuple[list[str], Path]:
         """
@@ -135,6 +151,7 @@ class HarborCommandBuilder:
             task_include_pattern=dataset_pattern,
             n_tasks=n_tasks,
             job_name=job_name,
+            agent_version=agent_version,
         )
 
         job_path = self.jobs_dir / job_name

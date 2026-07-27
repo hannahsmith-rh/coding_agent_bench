@@ -71,7 +71,7 @@ class OpenClawAgentConfig(AgentConfig):
         model_name = kwargs["model_name"]
         server_url = kwargs["server_url"]
         agent_env = {
-            "OPENAI_BASE_URL": server_url.rstrip("/") + "/v1",
+            "OPENAI_BASE_URL": server_url.rstrip("/").removesuffix("/v1") + "/v1",
             "OPENAI_API_KEY": "sk-no-key-required",
         }
         return AgentConfigResult(model="vllm/" + model_name, agent_env=agent_env)
@@ -97,7 +97,7 @@ class OpenCodeAgentConfig(AgentConfig):
                 "vllm": {
                     "npm": "@ai-sdk/openai-compatible",
                     "name": "vLLM",
-                    "options": {"baseURL": server_url.rstrip("/") + "/v1"},
+                    "options": {"baseURL": server_url.rstrip("/").removesuffix("/v1") + "/v1"},
                     "models": {
                         "qwen3.6-35b": {
                             "name": "qwen3.6-35b",
@@ -128,7 +128,7 @@ class OpenHandsSdkAgentConfig(AgentConfig):
         
         # Configure the environment
         model = "hosted_vllm/" + model_name
-        api_base = server_url.rstrip("/") + "/v1"
+        api_base = server_url.rstrip("/").removesuffix("/v1") + "/v1"
 
         agent_env = {
             "HOSTED_VLLM_API_BASE": api_base,
@@ -149,7 +149,7 @@ class PiAgentConfig(AgentConfig):
         models_json = {
             "providers": {
                 "vllm": {
-                    "baseUrl": server_url.rstrip("/") + "/v1",
+                    "baseUrl": server_url.rstrip("/").removesuffix("/v1") + "/v1",
                     "api": "openai-completions",
                     "apiKey": "NONE",
                     "models": [

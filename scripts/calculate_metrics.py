@@ -100,6 +100,7 @@ def compute_metrics_legacy(job_dir: Path, num_gpus: int = None):
                     - datetime.fromisoformat(r["agent_execution"]["started_at"])
                 ).total_seconds()
                 for r in task_results
+                if r.get("agent_execution") is not None
             ]
         )
     )
@@ -191,6 +192,7 @@ def compute_metrics_latest(job_dir: Path, num_gpus: int = None):
                     - datetime.fromisoformat(r["agent_execution"]["started_at"])
                 ).total_seconds()
                 for r in task_results
+                if r.get("agent_execution") is not None
             ]
         )
     )
