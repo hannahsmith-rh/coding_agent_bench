@@ -50,7 +50,7 @@ class CreateJobRequest(BaseModel):
     n_tasks: Optional[int] = Field(None, description="Total number of tasks to run")
     model_max_len: int = Field(262000, description="Maximum model context length in tokens")
     before_script: Optional[str] = Field(None, description="Script to run before harbor job execution")
-    agent_version: Optional[str] = Field(None, description="Pin agent to a specific version (overrides agent_versions.toml)")
+    agent_version: Optional[str] = Field(None, description="Pin agent to a specific version (overrides default)")
 
 
 class ResumeJobRequest(BaseModel):
