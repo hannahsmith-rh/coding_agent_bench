@@ -352,7 +352,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.136.3" },
-    { name = "harbor", git = "https://github.com/taagarwa-rh/harbor.git?rev=fix%2Fopenshift-various-bugs" },
+    { name = "harbor", git = "https://github.com/redhat-et/harbor.git" },
     { name = "huggingface-hub", specifier = ">=0.20.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "tenacity", specifier = ">=8.0" },
@@ -642,8 +642,8 @@ wheels = [
 
 [[package]]
 name = "harbor"
-version = "0.18.0"
-source = { git = "https://github.com/taagarwa-rh/harbor.git?rev=fix%2Fopenshift-various-bugs#5cdba808ed2663cba6d90d7c66c784f862c561d4" }
+version = "0.20.0"
+source = { git = "https://github.com/redhat-et/harbor.git#292f042b87ffcba57e9d529e971993f486cb2813" }
 dependencies = [
     { name = "dirhash" },
     { name = "fastapi" },
