@@ -23,6 +23,7 @@ Reproducible benchmarks for coding agents and models using Harbor
 - [Queue Service](#queue-service)
   - [Set up the service](#set-up-the-service)
   - [Use the service](#use-the-service)
+  - [(Optional) Connect to Nebius](#optional-connect-to-nebius)
 - [Harbor Command Examples](#harbor-command-examples)
   - [Claude Code vLLM](#claude-code-vllm)
   - [Codex vLLM](#codex-vllm)
@@ -242,6 +243,32 @@ Cancel a running or queued job:
 ```sh
 curl -X DELETE $JOB_QUEUE_URL/jobs/<job_id> -H "X-API-Key: <your-api-key>"
 ```
+
+### (Optional) Connect to Nebius
+
+The queue service supports starting and stopping vLLM server instances automatically using [Nebius](https://nebius.com/).
+
+To connect to Nebius, first set up an AI Cloud account.
+
+TODO: Steps here
+
+After setting up the account, [install the CLI](https://docs.nebius.com/cli/install), [login to your account](https://docs.nebius.com/cli/configure), and run the following commands:
+
+```sh
+# Create a service account
+export SA_ID=$(nebius iam service-account create \
+  --name <service_account_name> \
+  --format json | jq -r '.metadata.id')
+
+# Create and attach an authorized key to the service account
+nebius iam auth-public-key generate \
+  --service-account-id $SA_ID \
+  --output ~/.nebius/$SA_ID-credentials.json
+
+echo -e "NEBIUS_ENABLED=1\nNEBIUS_SERVICE_ACCOUNT_CREDS_PATH=~/.nebius/$SA_ID-credentials.json"
+```
+
+Paste the result of the echo command above to your `.env` file.
 
 ## Harbor Command Examples
 
