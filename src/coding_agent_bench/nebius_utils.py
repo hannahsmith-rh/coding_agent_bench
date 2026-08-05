@@ -114,6 +114,18 @@ class NebiusInstanceManager:
         ]
         stdout = self.exec(args)
         return json.loads(stdout)
+    
+    def get_instance_ip_address(self, instance_name: str):
+        """Get the IP address of a running instance."""
+        try:
+            instance_details = self.get_instance(instance_name)
+        except Exception as e:
+            if "NotFound" in str(e):
+                raise ValueError("Instance not found")
+            else:
+                raise e
+        
+        return instance_details.get("status", {}).get("network_interfaces", [{}])[0].get("public_ip_address", {}).get("address")
 
     def start_instance(self, instance_name: str):
         """Start a stopped instance."""
@@ -211,15 +223,7 @@ class NebiusInstanceManager:
         
     def instance_exec(self, instance_name: str, command: list[str], exit_after: str = None):
         """Connect to an instance over SSH and execute a command."""
-        try:
-            instance_details = self.get_instance(instance_name)
-        except Exception as e:
-            if "NotFound" in str(e):
-                raise ValueError("Instance not found")
-            else:
-                raise e
-
-        public_ip_address = instance_details.get("status", {}).get("network_interfaces", [{}])[0].get("public_ip_address", {}).get("address")
+        public_ip_address = self.get_instance_ip_address(instance_name=instance_name)
 
         if public_ip_address is None:
             raise ValueError("Public IP address not found")
