@@ -25,9 +25,9 @@ class NebiusInstanceManager:
         self._service_account_id = service_account_id
         
         self._ssh_key = Path(self._ssh_public_key_path).expanduser().resolve().read_text()
-        
+
         self.profile = self.create_profile("default-service-account", credentials_path=Path(credentials_path).expanduser().resolve())
-        self.instances = []
+        self.instances: dict[str, dict] = {}
         
     def exec(self, args: list[str]):
         """Execute a nebius CLI command."""
@@ -103,7 +103,7 @@ class NebiusInstanceManager:
         self.exec(args)
         
         instance_details = self.get_instance(instance_name)
-        self.instances.append(instance_details["metadata"])
+        self.instances["instance_name"] = instance_details["metadata"]
 
     def get_instance(self, instance_name: str):
         """Get details about a running instance."""
@@ -215,11 +215,16 @@ class NebiusInstanceManager:
         
         if state == "RUNNING":
             self.stop_instance(instance_name)
-            
+
+        logger.info(f"Deleting instance {instance_name} ({instance_id})")
         args = [
             "compute", "instance", "delete",
             "--id", instance_id,
         ]
+        self.exec(args)
+        
+        self.instances.pop(instance_name, None)
+        logger.info(f"Deleted instance {instance_name} ({instance_id})")
         
     def instance_exec(self, instance_name: str, command: list[str], exit_after: str = None):
         """Connect to an instance over SSH and execute a command."""
@@ -238,12 +243,15 @@ class NebiusInstanceManager:
             shlex.join(command),
         ]
 
+        logger.info(f"Executing command  on {instance_name}: {command}")
+        logger.info(f"SSH command: {ssh_command}")
         if exit_after is None:
             process = subprocess.run(ssh_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             if process.returncode != 0:
                 raise Exception(f"SSH command failed:\nstdout: {process.stdout}\nstderr: {process.stderr}")
             return process.stdout
 
+        logger.info(f"Following command until '{exit_after}' is found:")
         process = subprocess.Popen(ssh_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         output_lines = []
         try:
