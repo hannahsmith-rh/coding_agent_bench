@@ -16,6 +16,7 @@ from pathlib import Path
 from coding_agent_bench.builder import SupportedAgent, HarborCommandBuilder
 from coding_agent_bench.job import OpenshiftJob
 from coding_agent_bench.nebius_utils import NebiusInstanceManager
+import getpass
 import json
 import os
 import shlex
@@ -342,7 +343,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         manager = NebiusInstanceManager(
             credentials_path=os.environ.get("NEBIUS_SERVICE_ACCOUNT_CREDS_PATH"),
             credentials=os.environ.get("NEBIUS_SERVICE_ACCOUNT_CREDS"),
-            user=os.environ["NEBIUS_USER"],
+            user=os.environ.get("NEBIUS_USER", getpass.getuser()),
             ssh_public_key_path=os.environ["NEBIUS_SSH_PUBLIC_KEY_PATH"],
             ssh_private_key_path=os.environ["NEBIUS_SSH_PRIVATE_KEY_PATH"],
             parent_id=os.environ["NEBIUS_PARENT_ID"],
