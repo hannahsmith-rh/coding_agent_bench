@@ -283,11 +283,12 @@ stringData:
   NEBIUS_TENANT_ID: <tenant-id>
   NEBIUS_SERVICE_ACCOUNT_ID: <service-account-id>
   NEBIUS_SUBNET_ID: <subnet-id>
-  NEBIUS_GPU_CONFIG: b200
   NEBIUS_INSTANCE_NAME_PREFIX: job-queue-worker
   NEBIUS_IDLE_TIMEOUT_SECONDS: '600'
 type: Opaque
 ```
+
+When creating a job, set `server_url` to `nebius-<resource>` to use a managed Nebius instance with the specified GPU resource (e.g. `nebius-h200`, `nebius-b200`). Available resources are defined in `RESOURCE_CONFIG_REGISTRY`.
 
 ## Harbor Command Examples
 

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from coding_agent_bench.builder import SupportedAgent, HarborCommandBuilder
 from coding_agent_bench.job import OpenshiftJob
-from coding_agent_bench.nebius_utils import NebiusInstanceManager
+from coding_agent_bench.nebius_utils import NebiusInstanceManager, RESOURCE_CONFIG_REGISTRY
 import getpass
 import json
 import os
@@ -38,6 +38,16 @@ _job_event = asyncio.Event()
 _active_job: tuple[str, asyncio.Task, OpenshiftJob] | None = None
 _shutting_down = False
 _nebius: "NebiusOrchestrator | None" = None
+
+NEBIUS_PREFIX = "nebius-"
+
+
+def _parse_nebius_url(server_url: str) -> str | None:
+    """Return the resource config name if server_url is a nebius placeholder, else None."""
+    if server_url.startswith(NEBIUS_PREFIX):
+        return server_url[len(NEBIUS_PREFIX):]
+    return None
+
 
 db_path = Path(os.environ.get("JOB_STORE_PATH", "jobs.db"))
 
@@ -71,10 +81,9 @@ class NebiusOrchestrator:
     """
 
     def __init__(self, manager: NebiusInstanceManager, subnet_id: str,
-                 gpu_config: str, instance_name_prefix: str, idle_timeout: int):
+                 instance_name_prefix: str, idle_timeout: int):
         self._manager = manager
         self._subnet_id = subnet_id
-        self._gpu_config = gpu_config
         self._prefix = instance_name_prefix
         self._idle_timeout = idle_timeout
         self._instances: dict[str, NebiusInstanceState] = {}
@@ -84,7 +93,7 @@ class NebiusOrchestrator:
         """Return the name for the next instance. Currently single-instance."""
         return f"{self._prefix}-0"
 
-    async def acquire_instance(self, model_name: str) -> tuple[str, str]:
+    async def acquire_instance(self, model_name: str, gpu_config: str) -> tuple[str, str]:
         """
         Provision an instance with the requested model and return (instance_name, server_url).
 
@@ -111,7 +120,7 @@ class NebiusOrchestrator:
             # Create the instance if we haven't tracked it yet
             if instance_name not in self._instances:
                 logger.info(f"Creating nebius instance {instance_name}")
-                await self._manager.create_instance(instance_name, self._subnet_id, self._gpu_config)
+                await self._manager.create_instance(instance_name, self._subnet_id, gpu_config)
                 self._instances[instance_name] = NebiusInstanceState(instance_name=instance_name, last_job_completed_at=time.time())
 
             # Start the instance (noop if already running)
@@ -122,7 +131,7 @@ class NebiusOrchestrator:
                 if "not found" in str(e).lower() or "NotFound" in str(e):
                     logger.warning(f"Instance {instance_name} no longer exists, recreating")
                     del self._instances[instance_name]
-                    await self._manager.create_instance(instance_name, self._subnet_id, self._gpu_config)
+                    await self._manager.create_instance(instance_name, self._subnet_id, gpu_config)
                     self._instances[instance_name] = NebiusInstanceState(instance_name=instance_name, last_job_completed_at=time.time())
                     await self._manager.start_instance(instance_name)
                 else:
@@ -211,7 +220,7 @@ class CreateJobRequest(BaseModel):
     agent: SupportedAgent = Field(..., description="Agent to use")
     dataset: str = Field(..., description="Dataset name or path")
     model_name: str = Field(..., description="Model name")
-    server_url: str = Field(..., description="Model server URL")  
+    server_url: str = Field(..., description="Model server URL, or 'nebius-<resource>' (e.g. nebius-h200) for managed Nebius instances")
     dataset_pattern: Optional[str] = Field(None, description="Pattern to filter dataset tasks")
     n_concurrent: int = Field(1, description="Number of concurrent tasks")
     n_tasks: Optional[int] = Field(None, description="Total number of tasks to run")
@@ -363,7 +372,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         _nebius = NebiusOrchestrator(
             manager=manager,
             subnet_id=os.environ["NEBIUS_SUBNET_ID"],
-            gpu_config=os.environ.get("NEBIUS_GPU_CONFIG", "h200"),
             instance_name_prefix=os.environ.get("NEBIUS_INSTANCE_NAME_PREFIX", "cab-worker"),
             idle_timeout=NEBIUS_IDLE_TIMEOUT,
         )
@@ -556,7 +564,7 @@ def _reorder_queue_for_nebius():
     if not current_model:
         return
     _job_queue.sort(key=lambda item: (
-        0 if item[2] != "nebius" else (0 if item[3] == current_model else 1)
+        0 if _parse_nebius_url(item[2]) is None else (0 if item[3] == current_model else 1)
     ))
 
 
@@ -574,11 +582,11 @@ async def _worker():
 
             # For nebius jobs: provision instance, swap model, patch the command
             nebius_instance_name: str | None = None
-            if server_url == "nebius" and _nebius:
+            nebius_gpu_config = _parse_nebius_url(server_url)
+            if nebius_gpu_config is not None and _nebius:
                 try:
-                    nebius_instance_name, real_url = await _nebius.acquire_instance(model_name)
-                    # Replace "nebius" placeholder with the real server URL in the command
-                    command = [real_url if arg == "nebius" else arg for arg in command]
+                    nebius_instance_name, real_url = await _nebius.acquire_instance(model_name, gpu_config=nebius_gpu_config)
+                    command = [real_url if arg == server_url else arg for arg in command]
                     await _nebius.mark_job_started(nebius_instance_name)
                 except Exception as e:
                     logger.exception(f"Nebius provisioning failed for job {job_id}")
@@ -703,7 +711,16 @@ def build_cli_command(req: CreateJobRequest):
 async def create_job(req: CreateJobRequest):
     """Create a new benchmark job."""
     # Skip harbor command validation for nebius jobs (server_url is a placeholder)
-    if req.server_url != "nebius":
+    nebius_gpu_config = _parse_nebius_url(req.server_url)
+    if nebius_gpu_config is not None:
+        if not _nebius:
+            raise HTTPException(status_code=400, detail="Nebius is not enabled on this server")
+        if nebius_gpu_config not in RESOURCE_CONFIG_REGISTRY:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown resource config '{nebius_gpu_config}'. Choose from: {', '.join(RESOURCE_CONFIG_REGISTRY)}",
+            )
+    else:
         try:
             HarborCommandBuilder().build(
                 agent=req.agent,
@@ -719,8 +736,6 @@ async def create_job(req: CreateJobRequest):
             )
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
-    elif not _nebius:
-        raise HTTPException(status_code=400, detail="Nebius is not enabled on this server")
 
     # Build the CLI command
     command = build_cli_command(req=req)
