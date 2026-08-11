@@ -340,7 +340,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     background_tasks: list[asyncio.Task] = []
     if os.environ.get("NEBIUS_ENABLED") == "1":
         manager = NebiusInstanceManager(
-            credentials_path=os.environ["NEBIUS_SERVICE_ACCOUNT_CREDS_PATH"],
+            credentials_path=os.environ.get("NEBIUS_SERVICE_ACCOUNT_CREDS_PATH"),
+            credentials=os.environ.get("NEBIUS_SERVICE_ACCOUNT_CREDS"),
             user=os.environ["NEBIUS_USER"],
             ssh_public_key_path=os.environ["NEBIUS_SSH_PUBLIC_KEY_PATH"],
             ssh_private_key_path=os.environ["NEBIUS_SSH_PRIVATE_KEY_PATH"],

@@ -4,6 +4,7 @@ import asyncio
 import logging
 import json
 import shlex
+import tempfile
 
 from coding_agent_bench.models import get_model_config
 
@@ -40,8 +41,11 @@ RESOURCE_CONFIG_REGISTRY: dict[str, ResourceConfig] = {c.name: c for c in RESOUR
 class NebiusInstanceManager:
     """Manage Nebius compute instances via the nebius CLI."""
 
-    def __init__(self, credentials_path: str | Path, user: str, ssh_public_key_path: str | Path, ssh_private_key_path: str | Path, parent_id: str, tenant_id: str, service_account_id: str):
+    def __init__(self, credentials_path: str | Path | None, user: str, ssh_public_key_path: str | Path, ssh_private_key_path: str | Path, parent_id: str, tenant_id: str, service_account_id: str, credentials: str | None = None):
+        if credentials_path is None and credentials is None:
+            raise ValueError("Either credentials_path or credentials must be provided")
         self._credentials_path = credentials_path
+        self._credentials = credentials
         self._ssh_public_key_path = ssh_public_key_path
         self._ssh_private_key_path = ssh_private_key_path
         self._user = user
@@ -53,9 +57,16 @@ class NebiusInstanceManager:
 
     async def init(self):
         """Create the default CLI profile. Call once after construction."""
+        if self._credentials_path:
+            creds_path = Path(self._credentials_path).expanduser().resolve()
+        else:
+            f = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+            f.write(self._credentials)  # type: ignore[arg-type]  # validated non-None in __init__
+            f.close()
+            creds_path = Path(f.name)
         self.profile = await self.create_profile(
             "default-service-account",
-            credentials_path=Path(self._credentials_path).expanduser().resolve(),
+            credentials_path=creds_path,
         )
 
     async def exec(self, args: list[str]) -> str:
