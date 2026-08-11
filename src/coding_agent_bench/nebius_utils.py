@@ -181,8 +181,25 @@ class NebiusInstanceManager:
                 return False
             raise
 
+    async def _wait_for_instance_state(self, instance_name: str, target: str, timeout: int = 300, interval: int = 10):
+        """Poll until instance reaches target state. Raises on ERROR or timeout."""
+        terminal_ok = {target}
+        terminal_fail = {"ERROR", "CRASHED", "DELETED"}
+        deadline = asyncio.get_event_loop().time() + timeout
+        while True:
+            details = await self.get_instance(instance_name)
+            state = details.get("status", {}).get("state")
+            if state in terminal_ok:
+                return
+            if state in terminal_fail:
+                raise RuntimeError(f"Instance {instance_name} reached {state} while waiting for {target}")
+            if asyncio.get_event_loop().time() >= deadline:
+                raise TimeoutError(f"Instance {instance_name} still in {state} after {timeout}s (wanted {target})")
+            logger.info(f"Instance {instance_name} in {state}, waiting for {target}...")
+            await asyncio.sleep(interval)
+
     async def start_instance(self, instance_name: str):
-        """Start a stopped instance."""
+        """Start a stopped instance and wait until it is RUNNING."""
         try:
             instance_details = await self.get_instance(instance_name)
         except Exception as e:
@@ -201,25 +218,24 @@ class NebiusInstanceManager:
             logger.info(f"Instance {instance_name} ({instance_id}) is already running")
             return
 
-        if state in ["STOPPED", "STOPPING"]:
-            try:
+        if state in ["STOPPED", "STOPPING", "STARTING", "CREATING"]:
+            if state in ["STOPPED", "STOPPING"]:
                 logger.info(f"Starting instance {instance_name} ({instance_id})")
                 args = [
                     "compute", "instance", "start",
                     "--id", instance_id,
                 ]
                 await self.exec(args)
-                logger.info(f"Instance {instance_name} ({instance_id}) started")
-            except Exception as e:
-                logger.error(f"Failed to start instance {instance_name}: {e}")
-                raise e
+            else:
+                logger.info(f"Instance {instance_name} ({instance_id}) is {state}, waiting for RUNNING")
+            await self._wait_for_instance_state(instance_name, "RUNNING")
+            logger.info(f"Instance {instance_name} ({instance_id}) is now running")
             return
 
-        else:
-            logger.info(f"Instance {instance_name} ({instance_id}) is in an unknown state: {state}")
+        raise RuntimeError(f"Instance {instance_name} ({instance_id}) is in unexpected state: {state}")
 
     async def stop_instance(self, instance_name: str):
-        """Stop a running instance."""
+        """Stop a running instance and wait until it is STOPPED."""
         try:
             instance_details = await self.get_instance(instance_name)
         except Exception as e:
@@ -234,26 +250,25 @@ class NebiusInstanceManager:
         if state is None:
             raise ValueError("Instance state is not available")
 
-        if state in ["STOPPED", "STOPPING"]:
+        if state == "STOPPED":
             logger.info(f"Instance {instance_name} ({instance_id}) is already stopped")
             return
 
-        if state == "RUNNING":
-            try:
+        if state in ["RUNNING", "STARTING", "STOPPING"]:
+            if state in ["RUNNING", "STARTING"]:
                 logger.info(f"Stopping instance {instance_name} ({instance_id})")
                 args = [
                     "compute", "instance", "stop",
                     "--id", instance_id,
                 ]
                 await self.exec(args)
-                logger.info(f"Instance {instance_name} ({instance_id}) stopped")
-            except Exception as e:
-                logger.error(f"Failed to stop instance {instance_name}: {e}")
-                raise e
+            else:
+                logger.info(f"Instance {instance_name} ({instance_id}) is STOPPING, waiting for STOPPED")
+            await self._wait_for_instance_state(instance_name, "STOPPED")
+            logger.info(f"Instance {instance_name} ({instance_id}) is now stopped")
             return
 
-        else:
-            logger.info(f"Instance {instance_name} ({instance_id}) is in an unknown state: {state}")
+        raise RuntimeError(f"Instance {instance_name} ({instance_id}) is in unexpected state: {state}")
 
     async def delete_instance(self, instance_name: str):
         try:
