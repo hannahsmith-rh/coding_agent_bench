@@ -247,12 +247,13 @@ curl -X DELETE $JOB_QUEUE_URL/jobs/<job_id> -H "X-API-Key: <your-api-key>"
 ### (Optional) Connect to Nebius
 
 The queue service supports starting and stopping vLLM server instances automatically using [Nebius](https://nebius.com/).
+When enabled, the queue service will create a Nebius VM, SSH into the instance, start the vLLM server for the next model in the queue, run the benchmark job against that model, swap the running model for the next model in the queue, then spin down the Nebius VM when the queue is empty.
 
-To connect to Nebius, first set up an AI Cloud account.
+To connect the queue service to Nebius, first [set up an AI Cloud account](https://docs.nebius.com/signup-billing/sign-up).
 
-TODO: Steps here
+After setting up the account, [install the CLI](https://docs.nebius.com/cli/install) and [login to your account](https://docs.nebius.com/cli/configure).
 
-After setting up the account, [install the CLI](https://docs.nebius.com/cli/install), [login to your account](https://docs.nebius.com/cli/configure), and run the following commands:
+Then run the following commands to create a service account in your project:
 
 ```sh
 # Create a service account
@@ -264,11 +265,29 @@ export SA_ID=$(nebius iam service-account create \
 nebius iam auth-public-key generate \
   --service-account-id $SA_ID \
   --output ~/.nebius/$SA_ID-credentials.json
-
-echo -e "NEBIUS_ENABLED=1\nNEBIUS_SERVICE_ACCOUNT_CREDS_PATH=~/.nebius/$SA_ID-credentials.json"
 ```
 
-Paste the result of the echo command above to your `.env` file.
+Once the service account is created, you can update your job queue secret with the following environment variables needed for Nebius:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name:  job-queue-secret
+stringData:
+  API_KEY: <your-api-key>
+  NEBIUS_ENABLED: '1'
+  NEBIUS_SERVICE_ACCOUNT_CREDS: |
+    <service-account-file-content>
+  NEBIUS_PARENT_ID: <project-id>
+  NEBIUS_TENANT_ID: <tenant-id>
+  NEBIUS_SERVICE_ACCOUNT_ID: <service-account-id>
+  NEBIUS_SUBNET_ID: <subnet-id>
+  NEBIUS_GPU_CONFIG: b200
+  NEBIUS_INSTANCE_NAME_PREFIX: job-queue-worker
+  NEBIUS_IDLE_TIMEOUT_SECONDS: '600'
+type: Opaque
+```
 
 ## Harbor Command Examples
 
