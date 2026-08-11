@@ -112,7 +112,7 @@ class NebiusOrchestrator:
             if instance_name not in self._instances:
                 logger.info(f"Creating nebius instance {instance_name}")
                 await self._manager.create_instance(instance_name, self._subnet_id, self._gpu_config)
-                self._instances[instance_name] = NebiusInstanceState(instance_name=instance_name)
+                self._instances[instance_name] = NebiusInstanceState(instance_name=instance_name, last_job_completed_at=time.time())
 
             # Start the instance (noop if already running)
             logger.info(f"Ensuring nebius instance {instance_name} is running")
@@ -123,7 +123,7 @@ class NebiusOrchestrator:
                     logger.warning(f"Instance {instance_name} no longer exists, recreating")
                     del self._instances[instance_name]
                     await self._manager.create_instance(instance_name, self._subnet_id, self._gpu_config)
-                    self._instances[instance_name] = NebiusInstanceState(instance_name=instance_name)
+                    self._instances[instance_name] = NebiusInstanceState(instance_name=instance_name, last_job_completed_at=time.time())
                     await self._manager.start_instance(instance_name)
                 else:
                     raise
@@ -374,6 +374,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await task
         except asyncio.CancelledError:
             pass
+    if _nebius is not None:
+        for name in list(_nebius._instances):
+            try:
+                logger.info(f"Shutdown: deleting nebius instance {name}")
+                await _nebius._manager.delete_instance(name)
+            except Exception:
+                logger.exception(f"Failed to delete nebius instance {name} during shutdown")
 
 
 app = FastAPI(lifespan=lifespan)
