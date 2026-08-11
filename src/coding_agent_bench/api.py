@@ -115,20 +115,36 @@ class NebiusOrchestrator:
 
             # Start the instance (noop if already running)
             logger.info(f"Ensuring nebius instance {instance_name} is running")
-            await self._manager.start_instance(instance_name)
+            try:
+                await self._manager.start_instance(instance_name)
+            except (ValueError, Exception) as e:
+                if "not found" in str(e).lower() or "NotFound" in str(e):
+                    logger.warning(f"Instance {instance_name} no longer exists, recreating")
+                    del self._instances[instance_name]
+                    await self._manager.create_instance(instance_name, self._subnet_id, self._gpu_config)
+                    self._instances[instance_name] = NebiusInstanceState(instance_name=instance_name)
+                    await self._manager.start_instance(instance_name)
+                else:
+                    raise
 
             state = self._instances[instance_name]
 
             # Swap model if needed
             if state.current_model != model_name:
                 state.provisioning_model = model_name
-                if state.current_model is not None:
-                    logger.info(f"Stopping model {state.current_model} on {instance_name}")
-                    await self._manager.stop_model(instance_name)
-                logger.info(f"Starting model {model_name} on {instance_name}")
-                await self._manager.start_model(instance_name, model_name)
-                state.current_model = model_name
-                state.provisioning_model = None
+                old_model = state.current_model
+                try:
+                    if old_model is not None:
+                        logger.info(f"Stopping model {old_model} on {instance_name}")
+                        await self._manager.stop_model(instance_name)
+                    logger.info(f"Starting model {model_name} on {instance_name}")
+                    await self._manager.start_model(instance_name, model_name)
+                    state.current_model = model_name
+                except Exception:
+                    state.current_model = None
+                    raise
+                finally:
+                    state.provisioning_model = None
 
             # Fetch the public IP and build the server URL
             ip = await self._manager.get_instance_ip_address(instance_name)
@@ -146,7 +162,7 @@ class NebiusOrchestrator:
         state.last_job_completed_at = time.time()
 
     async def idle_cleanup_loop(self):
-        """Periodically delete instances that have been idle longer than the timeout."""
+        """Periodically delete idle instances and evict stale entries."""
         while True:
             await asyncio.sleep(60)
             try:
@@ -161,6 +177,16 @@ class NebiusOrchestrator:
                     for name in to_delete:
                         logger.info(f"Deleting idle nebius instance {name}")
                         await self._manager.delete_instance(name)
+                        del self._instances[name]
+
+                    to_evict = []
+                    for name, s in self._instances.items():
+                        if s.job_running:
+                            continue
+                        if not await self._manager.instance_exists(name):
+                            to_evict.append(name)
+                    for name in to_evict:
+                        logger.warning(f"Evicting stale nebius instance {name} (no longer exists)")
                         del self._instances[name]
             except Exception:
                 logger.exception("Nebius idle cleanup failed")

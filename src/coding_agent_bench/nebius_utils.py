@@ -22,7 +22,7 @@ class B200(ResourceConfig):
     name = "b200"
     platform = "gpu-b200-sxm"
     preset = "1gpu-20vcpu-224gb"
-    additional_args = ["--preemptible-on-preemption", "stop"]
+    additional_args = ["--preemptible-on-preemption", "stop", "--recovery-policy", "fail"]
     
 class H200(ResourceConfig):
 
@@ -160,6 +160,15 @@ class NebiusInstanceManager:
                 raise e
 
         return instance_details.get("status", {}).get("network_interfaces", [{}])[0].get("public_ip_address", {}).get("address")
+
+    async def instance_exists(self, instance_name: str) -> bool:
+        try:
+            await self.get_instance(instance_name)
+            return True
+        except Exception as e:
+            if "NotFound" in str(e):
+                return False
+            raise
 
     async def start_instance(self, instance_name: str):
         """Start a stopped instance."""
@@ -351,8 +360,9 @@ class NebiusInstanceManager:
             await process.wait()
             raise
         except Exception:
-            process.kill()
-            await process.wait()
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
             raise
 
     async def start_model(self, instance_name: str, model_name: str):
@@ -391,7 +401,8 @@ class NebiusInstanceManager:
         command += ["--tensor-parallel-size", str(tensor_parallel_size)]
 
         # Execute the command on the instance
-        await self.instance_exec(instance_name=instance_name, command=command, exit_after="Available routes")
+        # More retries than default — instance may have just booted and sshd isn't ready yet
+        await self.instance_exec(instance_name=instance_name, command=command, exit_after="Available routes", retries=18, retry_delay=10)
 
     async def stop_model(self, instance_name: str):
         """Stop a running vLLM server on the given instance."""
