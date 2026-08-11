@@ -49,7 +49,6 @@ class RedHatAI_NVIDIA_Nemotron_3_Super_120B_A12B_NVFP4(ModelConfig):
         "--model", "RedHatAI/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
         "--dtype", "auto",
         "--kv-cache-dtype", "fp8",
-        "--tensor-parallel-size", "1",
         "--gpu-memory-utilization", "0.9",
         "--async-scheduling",
         "--enable-chunked-prefill",
