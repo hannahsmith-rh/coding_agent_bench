@@ -66,6 +66,7 @@ NEBIUS_IDLE_TIMEOUT = int(os.environ.get("NEBIUS_IDLE_TIMEOUT_SECONDS", "600"))
 @dataclass
 class NebiusInstanceState:
     instance_name: str
+    gpu_config: str
     current_model: str | None = None
     provisioning_model: str | None = None  # set while a model is being started/swapped
     job_running: bool = False
@@ -102,26 +103,32 @@ class NebiusOrchestrator:
         satisfied to minimize latency.
         """
         async with self._lock:
-            # Reuse an existing instance with the same model, or any idle instance,
-            # or create a new one.
+            # Reuse an existing instance with matching gpu_config, or create a new one.
+            # Delete idle instances with the wrong gpu_config to free the slot.
             instance_name = None
+            to_delete: list[str] = []
             for name, state in self._instances.items():
-                if state.current_model == model_name and not state.job_running:
+                if state.job_running:
+                    continue
+                if state.gpu_config == gpu_config:
                     instance_name = name
                     break
-            if instance_name is None:
-                for name, state in self._instances.items():
-                    if not state.job_running:
-                        instance_name = name
-                        break
+                else:
+                    to_delete.append(name)
+
+            for name in to_delete:
+                logger.info(f"Deleting nebius instance {name} (gpu_config mismatch, had {self._instances[name].gpu_config}, need {gpu_config})")
+                await self._manager.delete_instance(name)
+                del self._instances[name]
+
             if instance_name is None:
                 instance_name = self._pick_instance_name()
 
             # Create the instance if we haven't tracked it yet
             if instance_name not in self._instances:
-                logger.info(f"Creating nebius instance {instance_name}")
+                logger.info(f"Creating nebius instance {instance_name} with {gpu_config}")
                 await self._manager.create_instance(instance_name, self._subnet_id, gpu_config)
-                self._instances[instance_name] = NebiusInstanceState(instance_name=instance_name, last_job_completed_at=time.time())
+                self._instances[instance_name] = NebiusInstanceState(instance_name=instance_name, gpu_config=gpu_config, last_job_completed_at=time.time())
 
             # Start the instance (noop if already running)
             logger.info(f"Ensuring nebius instance {instance_name} is running")
@@ -132,7 +139,7 @@ class NebiusOrchestrator:
                     logger.warning(f"Instance {instance_name} no longer exists, recreating")
                     del self._instances[instance_name]
                     await self._manager.create_instance(instance_name, self._subnet_id, gpu_config)
-                    self._instances[instance_name] = NebiusInstanceState(instance_name=instance_name, last_job_completed_at=time.time())
+                    self._instances[instance_name] = NebiusInstanceState(instance_name=instance_name, gpu_config=gpu_config, last_job_completed_at=time.time())
                     await self._manager.start_instance(instance_name)
                 else:
                     raise
@@ -551,21 +558,28 @@ async def _run_job(job_id: str, command: list[str]):
 
 
 def _reorder_queue_for_nebius():
-    """Stable-sort the queue so nebius jobs matching the currently loaded model
-    come before nebius jobs that would require a model swap. Non-nebius jobs
-    keep their original position."""
+    """Stable-sort the queue so nebius jobs that can reuse the current instance
+    come first. Priority: same gpu+model (free) > same gpu (model swap) >
+    different gpu (instance recreate). Non-nebius jobs keep their position."""
     if not _nebius:
         return
     states = _nebius.get_instance_states()
     if not states:
         return
-    # Use the first instance's model as the preferred one
+    current_gpu = states[0].gpu_config
     current_model = states[0].current_model
-    if not current_model:
-        return
-    _job_queue.sort(key=lambda item: (
-        0 if _parse_nebius_url(item[2]) is None else (0 if item[3] == current_model else 1)
-    ))
+
+    def _sort_key(item):
+        gpu = _parse_nebius_url(item[2])
+        if gpu is None:
+            return 0  # non-nebius, keep in place
+        if gpu == current_gpu and item[3] == current_model:
+            return 0  # free reuse
+        if gpu == current_gpu:
+            return 1  # model swap only
+        return 2  # instance recreate
+
+    _job_queue.sort(key=_sort_key)
 
 
 async def _worker():
@@ -631,7 +645,7 @@ async def ui():
     nebius_section = ""
     if _nebius:
         states = _nebius.get_instance_states()
-        nebius_cols = ["Instance Name", "Current Model", "Status", "Last Job Completed"]
+        nebius_cols = ["Instance Name", "GPU Config", "Current Model", "Status", "Last Job Completed"]
         nebius_header = "".join(f"<th>{c}</th>" for c in nebius_cols)
         nebius_rows = ""
         for s in states:
@@ -647,6 +661,7 @@ async def ui():
             )
             nebius_rows += (
                 f"<tr><td>{html.escape(s.instance_name)}</td>"
+                f"<td>{html.escape(s.gpu_config)}</td>"
                 f"<td>{html.escape(s.current_model or '—')}</td>"
                 f"<td>{status}</td>"
                 f"<td>{last_completed}</td></tr>"
