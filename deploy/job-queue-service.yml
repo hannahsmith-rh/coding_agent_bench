@@ -42,9 +42,10 @@ spec:
         command: ["/bin/sh", "-c"]
         args:
           - |
-            ssh-keygen -t ed25519 -f ~/.ssh/nebius -N "" -q && \
-            NEBIUS_SSH_PUBLIC_KEY_PATH=~/.ssh/nebius.pub \
-            NEBIUS_SSH_PRIVATE_KEY_PATH=~/.ssh/nebius \
+            mkdir -p ~/.ssh && \
+            [ -f /app/data/nebius-ssh-key ] || ssh-keygen -t ed25519 -f /app/data/nebius-ssh-key -N "" -q && \
+            NEBIUS_SSH_PUBLIC_KEY_PATH=/app/data/nebius-ssh-key.pub \
+            NEBIUS_SSH_PRIVATE_KEY_PATH=/app/data/nebius-ssh-key \
             uv run uvicorn coding_agent_bench.api:app --host 0.0.0.0 --port 8000
         resources:
           requests:
@@ -57,7 +58,7 @@ spec:
         - name: JOB_STORE_PATH
           value: /app/data/jobs.db
         envFrom:
-        - secretKeyRef:
+        - secretRef:
             name: job-queue-secret
         ports:
         - containerPort: 8000
