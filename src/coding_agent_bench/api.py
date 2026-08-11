@@ -430,6 +430,9 @@ async def _run_job(job_id: str, command: list[str]):
         await oj._wait_for_job_pod_ready()
         job_store.update_status(job_id, JobStatus.RUNNING)
 
+        consecutive_missing = 0
+        max_missing = 6  # 6 polls × 5s = 30s before declaring pod gone
+
         while True:
             stdout, _ = await oj._run_oc_command(
                 ["get", "pod", f"--selector=job-name={oj._pod_name}", "-o", "json"],
@@ -437,24 +440,39 @@ async def _run_job(job_id: str, command: list[str]):
             )
             if stdout:
                 pods = json.loads(stdout).get("items", [])
-                if pods:
-                    phase = pods[0].get("status", {}).get("phase", "")
-                    if phase == "Succeeded":
-                        cleanup_err = await _best_effort_cleanup(oj)
-                        job_store.update_status(
-                            job_id, JobStatus.COMPLETED,
-                            error=f"cleanup failed: {cleanup_err}" if cleanup_err else None,
-                        )
-                        return
-                    if phase in ("Failed", "Unknown", "Error"):
-                        reason = pods[0].get("status", {}).get("reason", "")
-                        message = pods[0].get("status", {}).get("message", "")
-                        cleanup_err = await _best_effort_cleanup(oj)
-                        error = f"{phase}: reason={reason}, message={message}"
-                        if cleanup_err:
-                            error += f"; cleanup failed: {cleanup_err}"
-                        job_store.update_status(job_id, JobStatus.FAILED, error=error)
-                        return
+            else:
+                pods = []
+
+            if not pods:
+                consecutive_missing += 1
+                if consecutive_missing >= max_missing:
+                    cleanup_err = await _best_effort_cleanup(oj)
+                    error = "Pod vanished (likely deleted externally)"
+                    if cleanup_err:
+                        error += f"; cleanup failed: {cleanup_err}"
+                    job_store.update_status(job_id, JobStatus.FAILED, error=error)
+                    return
+                await asyncio.sleep(5)
+                continue
+
+            consecutive_missing = 0
+            phase = pods[0].get("status", {}).get("phase", "")
+            if phase == "Succeeded":
+                cleanup_err = await _best_effort_cleanup(oj)
+                job_store.update_status(
+                    job_id, JobStatus.COMPLETED,
+                    error=f"cleanup failed: {cleanup_err}" if cleanup_err else None,
+                )
+                return
+            if phase in ("Failed", "Unknown", "Error"):
+                reason = pods[0].get("status", {}).get("reason", "")
+                message = pods[0].get("status", {}).get("message", "")
+                cleanup_err = await _best_effort_cleanup(oj)
+                error = f"{phase}: reason={reason}, message={message}"
+                if cleanup_err:
+                    error += f"; cleanup failed: {cleanup_err}"
+                job_store.update_status(job_id, JobStatus.FAILED, error=error)
+                return
             await asyncio.sleep(5)
 
     except asyncio.CancelledError:
