@@ -25,11 +25,24 @@ class B200(ResourceConfig):
     preset = "1gpu-20vcpu-224gb"
     additional_args = ["--preemptible-on-preemption", "stop", "--recovery-policy", "fail"]
     
+class B200x8(ResourceConfig):
+    
+    name = "b200x8"
+    platform = "gpu-b200-sxm"
+    preset = "8gpu-160vcpu-1792gb"
+    additional_args = ["--preemptible-on-preemption", "stop", "--recovery-policy", "fail"]
+
 class H200(ResourceConfig):
 
     name = "h200"
     platform = "gpu-h200-sxm"
     preset = "1gpu-16vcpu-200gb"
+    
+class H200x8(ResourceConfig):
+
+    name = "h200x8"
+    platform = "gpu-h200-sxm"
+    preset = "8gpu-128vcpu-1600gb"
 
 RESOURCE_CONFIGS: list[ResourceConfig] = [
     B200,
