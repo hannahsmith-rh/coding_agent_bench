@@ -346,7 +346,7 @@ class NebiusInstanceManager:
         process = await asyncio.create_subprocess_exec(
             *ssh_command,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
         )
         output_lines: list[str] = []
         try:
@@ -361,11 +361,8 @@ class NebiusInstanceManager:
                     return "".join(output_lines)
             await process.wait()
             if process.returncode != 0:
-                assert process.stderr is not None
-                stderr_bytes = await process.stderr.read()
-                stderr = stderr_bytes.decode() if stderr_bytes else ""
-                raise Exception(f"SSH command failed before '{exit_after}' was found:\nstdout: {''.join(output_lines)}\nstderr: {stderr}")
-            raise Exception(f"Command finished without outputting '{exit_after}':\nstdout: {''.join(output_lines)}")
+                raise Exception(f"SSH command failed before '{exit_after}' was found:\noutput: {''.join(output_lines)}")
+            raise Exception(f"Command finished without outputting '{exit_after}':\noutput: {''.join(output_lines)}")
         except asyncio.CancelledError:
             process.kill()
             await process.wait()
