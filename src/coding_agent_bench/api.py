@@ -292,6 +292,10 @@ class JobStore:
                 error TEXT
             )"""
         )
+        # Migrate: add server_url if upgrading from an older schema
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        if "server_url" not in columns:
+            conn.execute("ALTER TABLE jobs ADD COLUMN server_url TEXT NOT NULL DEFAULT ''")
         conn.commit()
         conn.close()
 
