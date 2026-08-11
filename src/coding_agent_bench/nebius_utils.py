@@ -57,6 +57,7 @@ class NebiusInstanceManager:
 
     async def init(self):
         """Create the default CLI profile. Call once after construction."""
+        temp_creds = False
         if self._credentials_path:
             creds_path = Path(self._credentials_path).expanduser().resolve()
         else:
@@ -64,10 +65,15 @@ class NebiusInstanceManager:
             f.write(self._credentials)  # type: ignore[arg-type]  # validated non-None in __init__
             f.close()
             creds_path = Path(f.name)
-        self.profile = await self.create_profile(
-            "default-service-account",
-            credentials_path=creds_path,
-        )
+            temp_creds = True
+        try:
+            self.profile = await self.create_profile(
+                "default-service-account",
+                credentials_path=creds_path,
+            )
+        finally:
+            if temp_creds:
+                creds_path.unlink(missing_ok=True)
 
     async def exec(self, args: list[str]) -> str:
         """Execute a nebius CLI command."""
