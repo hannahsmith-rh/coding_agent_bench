@@ -286,27 +286,27 @@ class NebiusInstanceManager:
         isn't ready yet). CancelledError is always re-raised immediately
         so shutdown isn't blocked.
         """
-        public_ip_address = await self.get_instance_ip_address(instance_name=instance_name)
-
-        if public_ip_address is None:
-            raise ValueError("Public IP address not found")
-
-        if "/" in public_ip_address:
-            public_ip_address = public_ip_address.split("/")[0]
-
-        ssh_command = [
-            "ssh", "-o", "StrictHostKeyChecking=no",
-            "-o", "ConnectTimeout=10",
-            "-i", str(self._ssh_private_key_path),
-            f"{self._user}@{public_ip_address}",
-            shlex.join(command),
-        ]
-
         logger.info(f"Executing command on {instance_name}: {command}")
 
-        last_error: Exception | None = None
+        last_error: Exception = ValueError(f"instance_exec called with retries=0 for {instance_name}")
         for attempt in range(1, retries + 1):
             try:
+                public_ip_address = await self.get_instance_ip_address(instance_name=instance_name)
+
+                if public_ip_address is None:
+                    raise ValueError("Public IP address not found")
+
+                if "/" in public_ip_address:
+                    public_ip_address = public_ip_address.split("/")[0]
+
+                ssh_command = [
+                    "ssh", "-o", "StrictHostKeyChecking=no",
+                    "-o", "ConnectTimeout=10",
+                    "-i", str(self._ssh_private_key_path),
+                    f"{self._user}@{public_ip_address}",
+                    shlex.join(command),
+                ]
+
                 if exit_after is None:
                     return await self._ssh_run(ssh_command)
                 else:
@@ -319,7 +319,7 @@ class NebiusInstanceManager:
                     logger.warning(f"SSH attempt {attempt}/{retries} failed, retrying in {retry_delay}s: {e}")
                     await asyncio.sleep(retry_delay)
 
-        raise last_error  # type: ignore[misc]
+        raise last_error
 
     async def _ssh_run(self, ssh_command: list[str]) -> str:
         """Run an SSH command and return stdout."""
