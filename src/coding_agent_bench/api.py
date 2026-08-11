@@ -155,10 +155,16 @@ class NebiusOrchestrator:
             return instance_name, server_url
 
     async def mark_job_started(self, instance_name: str):
+        if instance_name not in self._instances:
+            logger.warning(f"mark_job_started: instance {instance_name} already evicted")
+            return
         self._instances[instance_name].job_running = True
 
     async def mark_job_completed(self, instance_name: str):
-        state = self._instances[instance_name]
+        state = self._instances.get(instance_name)
+        if state is None:
+            logger.warning(f"mark_job_completed: instance {instance_name} already evicted")
+            return
         state.job_running = False
         state.last_job_completed_at = time.time()
 
