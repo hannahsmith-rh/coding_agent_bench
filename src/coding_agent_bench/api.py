@@ -133,11 +133,12 @@ class NebiusOrchestrator:
             # Swap model if needed
             if state.current_model != model_name:
                 state.provisioning_model = model_name
-                old_model = state.current_model
                 try:
-                    if old_model is not None:
-                        logger.info(f"Stopping model {old_model} on {instance_name}")
+                    try:
+                        logger.info(f"Stopping any running model on {instance_name}")
                         await self._manager.stop_model(instance_name)
+                    except Exception:
+                        logger.debug(f"stop_model failed on {instance_name} (may be expected)", exc_info=True)
                     logger.info(f"Starting model {model_name} on {instance_name}")
                     await self._manager.start_model(instance_name, model_name)
                     state.current_model = model_name
@@ -151,6 +152,8 @@ class NebiusOrchestrator:
             ip = await self._manager.get_instance_ip_address(instance_name)
             if ip and "/" in ip:
                 ip = ip.split("/")[0]
+            if not ip:
+                raise RuntimeError(f"Instance {instance_name} has no public IP address")
             server_url = f"http://{ip}:8000"
             return instance_name, server_url
 
