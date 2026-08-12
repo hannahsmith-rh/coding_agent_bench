@@ -16,6 +16,8 @@ from pathlib import Path
 from coding_agent_bench.builder import SupportedAgent, HarborCommandBuilder
 from coding_agent_bench.job import OpenshiftJob
 from coding_agent_bench.nebius_utils import NebiusInstanceManager, RESOURCE_CONFIG_REGISTRY
+from coding_agent_bench.models import ModelConfig, MODEL_REGISTRY
+
 import getpass
 import json
 import os
@@ -599,17 +601,23 @@ async def _worker():
                 continue
 
             # For nebius jobs: provision instance, swap model, patch the command
+            model_config: ModelConfig | None = None
             nebius_instance_name: str | None = None
             nebius_gpu_config = _parse_nebius_url(server_url)
             if nebius_gpu_config is not None and _nebius:
                 try:
                     nebius_instance_name, real_url = await _nebius.acquire_instance(model_name, gpu_config=nebius_gpu_config)
                     command = [real_url if arg == server_url else arg for arg in command]
+                    model_config = MODEL_REGISTRY.get(model_name)
                     await _nebius.mark_job_started(nebius_instance_name)
                 except Exception as e:
                     logger.exception(f"Nebius provisioning failed for job {job_id}")
                     job_store.update_status(job_id, JobStatus.FAILED, error=f"Nebius provisioning failed: {e}")
                     continue
+
+            # Add "--model-max-len" arg to the command to match served model max len, if not already present
+            if "--model-max-len" not in command and model_config is not None:
+                command += ["--model-max-len", str(model_config.model_max_len)]
 
             await _run_job(job_id, command)
 
