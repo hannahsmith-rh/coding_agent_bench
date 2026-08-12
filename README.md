@@ -285,6 +285,7 @@ stringData:
   NEBIUS_SUBNET_ID: <subnet-id>
   NEBIUS_INSTANCE_NAME_PREFIX: job-queue-worker
   NEBIUS_IDLE_TIMEOUT_SECONDS: '600'
+  HF_TOKEN: <optional-huggingface-token>
 type: Opaque
 ```
 

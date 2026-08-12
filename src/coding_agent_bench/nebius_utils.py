@@ -3,6 +3,7 @@ from pathlib import Path
 import asyncio
 import logging
 import json
+import os
 import shlex
 import tempfile
 
@@ -434,7 +435,7 @@ class NebiusInstanceManager:
             "--runtime", "nvidia",
             "--gpus", "all",
             "-v", "/home/.cache/huggingface:/root/.cache/huggingface",
-            "--env", "HF_TOKEN=$HF_TOKEN",
+            "--env", f"HF_TOKEN={os.environ.get('HF_TOKEN', '')}",
             "-p", "8000:8000",
             "--ipc=host",
         ]
