@@ -4,6 +4,7 @@ import asyncio
 import logging
 import json
 import os
+import re
 import shlex
 import tempfile
 
@@ -47,7 +48,9 @@ class H200x8(ResourceConfig):
 
 RESOURCE_CONFIGS: list[ResourceConfig] = [
     B200,
+    B200x8,
     H200,
+    H200x8,
 ]
 
 RESOURCE_CONFIG_REGISTRY: dict[str, ResourceConfig] = {c.name: c for c in RESOURCE_CONFIGS}
@@ -321,7 +324,11 @@ class NebiusInstanceManager:
         isn't ready yet). CancelledError is always re-raised immediately
         so shutdown isn't blocked.
         """
-        logger.info(f"Executing command on {instance_name}: {command}")
+        # Sanitize then log the command
+        log_safe = shlex.join(command)
+        if "HF_TOKEN" in log_safe:
+            log_safe = re.sub(r"HF_TOKEN=\S+", "HF_TOKEN=<redacted>", log_safe)
+        logger.info(f"Executing command on {instance_name}: {log_safe}")
 
         last_error: Exception = ValueError(f"instance_exec called with retries=0 for {instance_name}")
         for attempt in range(1, retries + 1):
@@ -428,22 +435,26 @@ class NebiusInstanceManager:
             raise ValueError("Unable to get resources from instance details")
         tensor_parallel_size = int(resources.split("-")[0].replace("gpu", ""))
 
-        # Build the vLLM command
-        command = [
+        # Build the vLLM command — HF_TOKEN is exported on the remote shell
+        # so it never appears in command args, logs, or `docker inspect`.
+        docker_cmd = [
             "sudo", "docker", "run",
             "--name", "vllm",
             "--runtime", "nvidia",
             "--gpus", "all",
             "-v", "/home/.cache/huggingface:/root/.cache/huggingface",
-            "--env", f"HF_TOKEN={os.environ.get('HF_TOKEN', '')}",
+            "--env", "HF_TOKEN",
             "-p", "8000:8000",
             "--ipc=host",
         ]
-        command += [model_config.image]
-        command += model_config.args + model_config.default_args
-        command += ["--tensor-parallel-size", str(tensor_parallel_size)]
+        docker_cmd += [model_config.image]
+        docker_cmd += model_config.args + model_config.default_args
+        docker_cmd += ["--tensor-parallel-size", str(tensor_parallel_size)]
 
-        # Execute the command on the instance
+        hf_token = os.environ.get("HF_TOKEN", "")
+        shell_command = f"export HF_TOKEN={shlex.quote(hf_token)} && {shlex.join(docker_cmd)}"
+        command = ["bash", "-c", shell_command]
+
         # More retries than default — instance may have just booted and sshd isn't ready yet
         await self.instance_exec(instance_name=instance_name, command=command, exit_after="Available routes", retries=18, retry_delay=10)
 
