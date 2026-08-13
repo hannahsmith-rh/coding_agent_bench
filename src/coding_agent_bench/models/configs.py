@@ -23,6 +23,7 @@ class RedHatAI_gpt_oss_120b(ModelConfig):
     args = [
         "--model", "RedHatAI/gpt-oss-120b",
         "--dtype", "auto",
+        "--max-model-len", "131072",
         "--kv-cache-dtype", "fp8",
         "--enable-auto-tool-choice",
         "--tool-call-parser", "openai",
@@ -52,6 +53,7 @@ class RedHatAI_NVIDIA_Nemotron_3_Super_120B_A12B_NVFP4(ModelConfig):
     args = [
         "--model", "RedHatAI/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
         "--dtype", "auto",
+        "--max-model-len", "262144",
         "--kv-cache-dtype", "fp8",
         "--gpu-memory-utilization", "0.9",
         "--enable-auto-tool-choice",
