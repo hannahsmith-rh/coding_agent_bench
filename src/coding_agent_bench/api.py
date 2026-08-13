@@ -136,7 +136,7 @@ class NebiusOrchestrator:
             logger.info(f"Ensuring nebius instance {instance_name} is running")
             try:
                 await self._manager.start_instance(instance_name)
-            except (ValueError, Exception) as e:
+            except Exception as e:
                 if "not found" in str(e).lower() or "NotFound" in str(e):
                     logger.warning(f"Instance {instance_name} no longer exists, recreating")
                     del self._instances[instance_name]
