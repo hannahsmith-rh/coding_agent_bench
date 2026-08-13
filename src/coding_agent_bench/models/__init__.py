@@ -19,7 +19,7 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {cls.name: cls() for cls in MODEL_CONFI
 
 
 def get_model_config(name: str) -> ModelConfig:
-    """Look up an model config by name. Raises ValueError if not found."""
+    """Look up a model config by name. Raises ValueError if not found."""
     config = MODEL_REGISTRY.get(name)
     if config is None:
         raise ValueError(
