@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import NamedTuple, Optional
 
 import asyncio
 import logging
@@ -34,8 +34,13 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# Queue items: (job_id, command, server_url, model_name)
-_job_queue: list[tuple[str, list[str], str, str]] = []
+class QueuedJob(NamedTuple):
+    job_id: str
+    command: list[str]
+    server_url: str
+    model_name: str
+
+_job_queue: list[QueuedJob] = []
 _job_event = asyncio.Event()
 _active_job: tuple[str, asyncio.Task, OpenshiftJob] | None = None
 _shutting_down = False
@@ -575,11 +580,11 @@ def _reorder_queue_for_nebius():
     current_gpu = states[0].gpu_config
     current_model = states[0].current_model
 
-    def _sort_key(item):
-        gpu = _parse_nebius_url(item[2])
+    def _sort_key(item: QueuedJob):
+        gpu = _parse_nebius_url(item.server_url)
         if gpu is None:
             return 0  # non-nebius, keep in place
-        if gpu == current_gpu and item[3] == current_model:
+        if gpu == current_gpu and item.model_name == current_model:
             return 0  # free reuse
         if gpu == current_gpu:
             return 1  # model swap only
@@ -770,7 +775,7 @@ async def create_job(req: CreateJobRequest):
     # Start the job
     job_id = str(uuid.uuid4())
     job_store.insert(job_id, req.job_name, req.agent.value, req.dataset, req.model_name, req.server_url, command)
-    _job_queue.append((job_id, command, req.server_url, req.model_name))
+    _job_queue.append(QueuedJob(job_id, command, req.server_url, req.model_name))
     _job_event.set()
 
     # Return a success response
@@ -802,8 +807,8 @@ async def delete_job(job_id: str):
         raise HTTPException(status_code=400, detail=f"Job already {job_row['status']}")
 
     # Remove from queue if still waiting
-    for i, (qid, *_rest) in enumerate(_job_queue):
-        if qid == job_id:
+    for i, queued in enumerate(_job_queue):
+        if queued.job_id == job_id:
             _job_queue.pop(i)
             job_store.update_status(job_id, JobStatus.CANCELLED)
             return {"message": "Job cancelled", "job_id": job_id}
@@ -901,7 +906,7 @@ async def resume_job(job_id: str, req: ResumeJobRequest = ResumeJobRequest()):
         resume_job_id, resume_job_name, job_row["agent"],
         job_row["dataset"], job_row["model_name"], original_server_url, command,
     )
-    _job_queue.append((resume_job_id, command, original_server_url, job_row["model_name"]))
+    _job_queue.append(QueuedJob(resume_job_id, command, original_server_url, job_row["model_name"]))
     _job_event.set()
 
     return {
