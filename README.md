@@ -23,6 +23,7 @@ Reproducible benchmarks for coding agents and models using Harbor
 - [Queue Service](#queue-service)
   - [Set up the service](#set-up-the-service)
   - [Use the service](#use-the-service)
+  - [(Optional) Connect to Nebius](#optional-connect-to-nebius)
 - [Harbor Command Examples](#harbor-command-examples)
   - [Claude Code vLLM](#claude-code-vllm)
   - [Codex vLLM](#codex-vllm)
@@ -242,6 +243,53 @@ Cancel a running or queued job:
 ```sh
 curl -X DELETE $JOB_QUEUE_URL/jobs/<job_id> -H "X-API-Key: <your-api-key>"
 ```
+
+### (Optional) Connect to Nebius
+
+The queue service supports starting and stopping vLLM server instances automatically using [Nebius](https://nebius.com/).
+When enabled, the queue service will create a Nebius VM, SSH into the instance, start the vLLM server for the next model in the queue, run the benchmark job against that model, swap the running model for the next model in the queue, then spin down the Nebius VM when the queue is empty.
+
+To connect the queue service to Nebius, first [set up an AI Cloud account](https://docs.nebius.com/signup-billing/sign-up).
+
+After setting up the account, [install the CLI](https://docs.nebius.com/cli/install) and [login to your account](https://docs.nebius.com/cli/configure).
+
+Then run the following commands to create a service account in your project:
+
+```sh
+# Create a service account
+export SA_ID=$(nebius iam service-account create \
+  --name <service_account_name> \
+  --format json | jq -r '.metadata.id')
+
+# Create and attach an authorized key to the service account
+nebius iam auth-public-key generate \
+  --service-account-id $SA_ID \
+  --output ~/.nebius/$SA_ID-credentials.json
+```
+
+Once the service account is created, you can update your job queue secret with the following environment variables needed for Nebius:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name:  job-queue-secret
+stringData:
+  API_KEY: <your-api-key>
+  NEBIUS_ENABLED: '1'
+  NEBIUS_SERVICE_ACCOUNT_CREDS: |
+    <service-account-file-content>
+  NEBIUS_PARENT_ID: <project-id>
+  NEBIUS_TENANT_ID: <tenant-id>
+  NEBIUS_SERVICE_ACCOUNT_ID: <service-account-id>
+  NEBIUS_SUBNET_ID: <subnet-id>
+  NEBIUS_INSTANCE_NAME_PREFIX: job-queue-worker
+  NEBIUS_IDLE_TIMEOUT_SECONDS: '600'
+  HF_TOKEN: <optional-huggingface-token>
+type: Opaque
+```
+
+When creating a job, set `server_url` to `nebius-<resource>` to use a managed Nebius instance with the specified GPU resource (e.g. `nebius-h200`, `nebius-b200`). Available resources are defined in `RESOURCE_CONFIG_REGISTRY`.
 
 ## Harbor Command Examples
 

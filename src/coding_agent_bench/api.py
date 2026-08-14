@@ -2,17 +2,23 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import NamedTuple, Optional
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
 from coding_agent_bench.builder import SupportedAgent, HarborCommandBuilder
 from coding_agent_bench.job import OpenshiftJob
+from coding_agent_bench.nebius_utils import NebiusInstanceManager, RESOURCE_CONFIG_REGISTRY
+from coding_agent_bench.models import ModelConfig, MODEL_REGISTRY
+
+import getpass
 import json
 import os
 import shlex
@@ -21,12 +27,34 @@ import uuid
 import html
 from urllib.parse import urlparse
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-_job_queue: list[tuple[str, list[str]]] = []
+class QueuedJob(NamedTuple):
+    job_id: str
+    command: list[str]
+    server_url: str
+    model_name: str
+
+_job_queue: list[QueuedJob] = []
 _job_event = asyncio.Event()
 _active_job: tuple[str, asyncio.Task, OpenshiftJob] | None = None
 _shutting_down = False
+_nebius: "NebiusOrchestrator | None" = None
+
+NEBIUS_PREFIX = "nebius-"
+
+
+def _parse_nebius_url(server_url: str) -> str | None:
+    """Return the resource config name if server_url is a nebius placeholder, else None."""
+    if server_url.startswith(NEBIUS_PREFIX):
+        return server_url[len(NEBIUS_PREFIX):]
+    return None
+
 
 db_path = Path(os.environ.get("JOB_STORE_PATH", "jobs.db"))
 
@@ -38,13 +66,175 @@ class JobStatus(str, Enum):
     CANCELLING = "cancelling"
     CANCELLED = "cancelled"
 
-        
+
+NEBIUS_IDLE_TIMEOUT = int(os.environ.get("NEBIUS_IDLE_TIMEOUT_SECONDS", "600"))
+
+
+@dataclass
+class NebiusInstanceState:
+    instance_name: str
+    gpu_config: str
+    current_model: str | None = None
+    provisioning_model: str | None = None  # set while a model is being started/swapped
+    job_running: bool = False
+    last_job_completed_at: float | None = None
+
+
+class NebiusOrchestrator:
+    """Async wrapper around NebiusInstanceManager that tracks instance lifecycle.
+
+    Manages a pool of Nebius GPU instances (currently one, designed for easy
+    extension to multiple). Handles instance creation, model swapping, idle
+    cleanup, and exposes state for the UI without making CLI calls.
+    """
+
+    def __init__(self, manager: NebiusInstanceManager, subnet_id: str,
+                 instance_name_prefix: str, idle_timeout: int):
+        self._manager = manager
+        self._subnet_id = subnet_id
+        self._prefix = instance_name_prefix
+        self._idle_timeout = idle_timeout
+        self._instances: dict[str, NebiusInstanceState] = {}
+        self._lock = asyncio.Lock()
+
+    def _pick_instance_name(self) -> str:
+        """Return the name for the next instance. Currently single-instance."""
+        return f"{self._prefix}-0"
+
+    async def acquire_instance(self, model_name: str, gpu_config: str) -> tuple[str, str]:
+        """
+        Provision an instance with the requested model and return (instance_name, server_url).
+
+        Creates the VM if it doesn't exist, starts it if stopped, and swaps
+        the model if a different one is loaded. Skips steps that are already
+        satisfied to minimize latency.
+        """
+        async with self._lock:
+            # Reuse an existing instance with matching gpu_config, or create a new one.
+            # Delete idle instances with the wrong gpu_config to free the slot.
+            instance_name = None
+            to_delete: list[str] = []
+            for name, state in self._instances.items():
+                if state.job_running:
+                    continue
+                if state.gpu_config == gpu_config:
+                    instance_name = name
+                    break
+                else:
+                    to_delete.append(name)
+
+            for name in to_delete:
+                logger.info(f"Deleting nebius instance {name} (gpu_config mismatch, had {self._instances[name].gpu_config}, need {gpu_config})")
+                await self._manager.delete_instance(name)
+                del self._instances[name]
+
+            if instance_name is None:
+                instance_name = self._pick_instance_name()
+
+            # Create the instance if we haven't tracked it yet
+            if instance_name not in self._instances:
+                logger.info(f"Creating nebius instance {instance_name} with {gpu_config}")
+                await self._manager.create_instance(instance_name, self._subnet_id, gpu_config)
+                self._instances[instance_name] = NebiusInstanceState(instance_name=instance_name, gpu_config=gpu_config, last_job_completed_at=time.time())
+
+            # Start the instance (noop if already running)
+            logger.info(f"Ensuring nebius instance {instance_name} is running")
+            try:
+                await self._manager.start_instance(instance_name)
+            except Exception as e:
+                if "not found" in str(e).lower() or "NotFound" in str(e):
+                    logger.warning(f"Instance {instance_name} no longer exists, recreating")
+                    del self._instances[instance_name]
+                    await self._manager.create_instance(instance_name, self._subnet_id, gpu_config)
+                    self._instances[instance_name] = NebiusInstanceState(instance_name=instance_name, gpu_config=gpu_config, last_job_completed_at=time.time())
+                    await self._manager.start_instance(instance_name)
+                else:
+                    raise
+
+            state = self._instances[instance_name]
+
+            # Swap model if needed
+            if state.current_model != model_name:
+                state.provisioning_model = model_name
+                try:
+                    try:
+                        logger.info(f"Stopping any running model on {instance_name}")
+                        await self._manager.stop_model(instance_name)
+                    except Exception:
+                        logger.debug(f"stop_model failed on {instance_name} (may be expected)", exc_info=True)
+                    logger.info(f"Starting model {model_name} on {instance_name}")
+                    await self._manager.start_model(instance_name, model_name)
+                    state.current_model = model_name
+                except Exception:
+                    state.current_model = None
+                    raise
+                finally:
+                    state.provisioning_model = None
+
+            # Fetch the public IP and build the server URL
+            ip = await self._manager.get_instance_ip_address(instance_name)
+            if ip and "/" in ip:
+                ip = ip.split("/")[0]
+            if not ip:
+                raise RuntimeError(f"Instance {instance_name} has no public IP address")
+            server_url = f"http://{ip}:8000"
+            return instance_name, server_url
+
+    async def mark_job_started(self, instance_name: str):
+        if instance_name not in self._instances:
+            logger.warning(f"mark_job_started: instance {instance_name} already evicted")
+            return
+        self._instances[instance_name].job_running = True
+
+    async def mark_job_completed(self, instance_name: str):
+        state = self._instances.get(instance_name)
+        if state is None:
+            logger.warning(f"mark_job_completed: instance {instance_name} already evicted")
+            return
+        state.job_running = False
+        state.last_job_completed_at = time.time()
+
+    async def idle_cleanup_loop(self):
+        """Periodically delete idle instances and evict stale entries."""
+        while True:
+            await asyncio.sleep(60)
+            try:
+                async with self._lock:
+                    now = time.time()
+                    to_delete = [
+                        name for name, s in self._instances.items()
+                        if not s.job_running
+                        and s.last_job_completed_at is not None
+                        and (now - s.last_job_completed_at) > self._idle_timeout
+                    ]
+                    for name in to_delete:
+                        logger.info(f"Deleting idle nebius instance {name}")
+                        await self._manager.delete_instance(name)
+                        del self._instances[name]
+
+                    to_evict = []
+                    for name, s in self._instances.items():
+                        if s.job_running:
+                            continue
+                        if not await self._manager.instance_exists(name):
+                            to_evict.append(name)
+                    for name in to_evict:
+                        logger.warning(f"Evicting stale nebius instance {name} (no longer exists)")
+                        del self._instances[name]
+            except Exception:
+                logger.exception("Nebius idle cleanup failed")
+
+    def get_instance_states(self) -> list[NebiusInstanceState]:
+        """Return current state of all managed instances (in-memory, no CLI calls)."""
+        return list(self._instances.values())
+
+
 class CreateJobRequest(BaseModel):
     job_name: str = Field(..., description="Name to give the job")
     agent: SupportedAgent = Field(..., description="Agent to use")
     dataset: str = Field(..., description="Dataset name or path")
     model_name: str = Field(..., description="Model name")
-    server_url: str = Field(..., description="Model server URL")  
+    server_url: str = Field(..., description="Model server URL, or 'nebius-<resource>' (e.g. nebius-h200) for managed Nebius instances")
     dataset_pattern: Optional[str] = Field(None, description="Pattern to filter dataset tasks")
     n_concurrent: int = Field(1, description="Number of concurrent tasks")
     n_tasks: Optional[int] = Field(None, description="Total number of tasks to run")
@@ -74,6 +264,7 @@ class JobResponse(BaseModel):
     agent: str
     dataset: str
     model_name: str
+    server_url: str
     command: str
     status: JobStatus
     error: str | None = None
@@ -102,20 +293,25 @@ class JobStore:
                 agent TEXT NOT NULL,
                 dataset TEXT NOT NULL,
                 model_name TEXT NOT NULL,
+                server_url TEXT NOT NULL DEFAULT '',
                 command TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'queued',
                 error TEXT
             )"""
         )
+        # Migrate: add server_url if upgrading from an older schema
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        if "server_url" not in columns:
+            conn.execute("ALTER TABLE jobs ADD COLUMN server_url TEXT NOT NULL DEFAULT ''")
         conn.commit()
         conn.close()
 
-    def insert(self, job_id: str, job_name: str, agent: str, dataset: str, model_name: str, command: list[str]):
+    def insert(self, job_id: str, job_name: str, agent: str, dataset: str, model_name: str, server_url: str, command: list[str]):
         """Add a new job to the tracking table."""
         conn = self._connect()
         conn.execute(
-            "INSERT INTO jobs (job_id, job_name, agent, dataset, model_name, command, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (job_id, job_name, agent, dataset, model_name, json.dumps(command), JobStatus.QUEUED.value),
+            "INSERT INTO jobs (job_id, job_name, agent, dataset, model_name, server_url, command, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (job_id, job_name, agent, dataset, model_name, server_url, json.dumps(command), JobStatus.QUEUED.value),
         )
         conn.commit()
         conn.close()
@@ -174,19 +370,52 @@ async def _verify_api_key(key: str = Depends(_api_key_header)) -> str:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    global _shutting_down
+    global _shutting_down, _nebius
     job_store.mark_orphaned()
+
+    # Initialize Nebius orchestrator if enabled
+    background_tasks: list[asyncio.Task] = []
+    if os.environ.get("NEBIUS_ENABLED") == "1":
+        manager = NebiusInstanceManager(
+            credentials_path=os.environ.get("NEBIUS_SERVICE_ACCOUNT_CREDS_PATH"),
+            credentials=os.environ.get("NEBIUS_SERVICE_ACCOUNT_CREDS"),
+            user=os.environ.get("NEBIUS_USER", getpass.getuser()),
+            ssh_public_key_path=os.environ["NEBIUS_SSH_PUBLIC_KEY_PATH"],
+            ssh_private_key_path=os.environ["NEBIUS_SSH_PRIVATE_KEY_PATH"],
+            parent_id=os.environ["NEBIUS_PARENT_ID"],
+            tenant_id=os.environ["NEBIUS_TENANT_ID"],
+            service_account_id=os.environ["NEBIUS_SERVICE_ACCOUNT_ID"],
+        )
+        await manager.init()
+        _nebius = NebiusOrchestrator(
+            manager=manager,
+            subnet_id=os.environ["NEBIUS_SUBNET_ID"],
+            instance_name_prefix=os.environ.get("NEBIUS_INSTANCE_NAME_PREFIX", "cab-worker"),
+            idle_timeout=NEBIUS_IDLE_TIMEOUT,
+        )
+        background_tasks.append(asyncio.create_task(_nebius.idle_cleanup_loop()))
+        logger.info("Nebius orchestrator initialized")
+
     worker_task = asyncio.create_task(_worker())
     cleanup_task = asyncio.create_task(_build_pod_cleanup_loop())
     yield
     _shutting_down = True
     worker_task.cancel()
     cleanup_task.cancel()
-    for task in (worker_task, cleanup_task):
+    for t in background_tasks:
+        t.cancel()
+    for task in (worker_task, cleanup_task, *background_tasks):
         try:
             await task
         except asyncio.CancelledError:
             pass
+    if _nebius is not None:
+        for name in list(_nebius._instances):
+            try:
+                logger.info(f"Shutdown: deleting nebius instance {name}")
+                await _nebius._manager.delete_instance(name)
+            except Exception:
+                logger.exception(f"Failed to delete nebius instance {name} during shutdown")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -271,6 +500,9 @@ async def _run_job(job_id: str, command: list[str]):
         await oj._wait_for_job_pod_ready()
         job_store.update_status(job_id, JobStatus.RUNNING)
 
+        consecutive_missing = 0
+        max_missing = 6  # 6 polls × 5s = 30s before declaring pod gone
+
         while True:
             stdout, _ = await oj._run_oc_command(
                 ["get", "pod", f"--selector=job-name={oj._pod_name}", "-o", "json"],
@@ -278,24 +510,39 @@ async def _run_job(job_id: str, command: list[str]):
             )
             if stdout:
                 pods = json.loads(stdout).get("items", [])
-                if pods:
-                    phase = pods[0].get("status", {}).get("phase", "")
-                    if phase == "Succeeded":
-                        cleanup_err = await _best_effort_cleanup(oj)
-                        job_store.update_status(
-                            job_id, JobStatus.COMPLETED,
-                            error=f"cleanup failed: {cleanup_err}" if cleanup_err else None,
-                        )
-                        return
-                    if phase in ("Failed", "Unknown", "Error"):
-                        reason = pods[0].get("status", {}).get("reason", "")
-                        message = pods[0].get("status", {}).get("message", "")
-                        cleanup_err = await _best_effort_cleanup(oj)
-                        error = f"{phase}: reason={reason}, message={message}"
-                        if cleanup_err:
-                            error += f"; cleanup failed: {cleanup_err}"
-                        job_store.update_status(job_id, JobStatus.FAILED, error=error)
-                        return
+            else:
+                pods = []
+
+            if not pods:
+                consecutive_missing += 1
+                if consecutive_missing >= max_missing:
+                    cleanup_err = await _best_effort_cleanup(oj)
+                    error = "Pod vanished (likely deleted externally)"
+                    if cleanup_err:
+                        error += f"; cleanup failed: {cleanup_err}"
+                    job_store.update_status(job_id, JobStatus.FAILED, error=error)
+                    return
+                await asyncio.sleep(5)
+                continue
+
+            consecutive_missing = 0
+            phase = pods[0].get("status", {}).get("phase", "")
+            if phase == "Succeeded":
+                cleanup_err = await _best_effort_cleanup(oj)
+                job_store.update_status(
+                    job_id, JobStatus.COMPLETED,
+                    error=f"cleanup failed: {cleanup_err}" if cleanup_err else None,
+                )
+                return
+            if phase in ("Failed", "Unknown", "Error"):
+                reason = pods[0].get("status", {}).get("reason", "")
+                message = pods[0].get("status", {}).get("message", "")
+                cleanup_err = await _best_effort_cleanup(oj)
+                error = f"{phase}: reason={reason}, message={message}"
+                if cleanup_err:
+                    error += f"; cleanup failed: {cleanup_err}"
+                job_store.update_status(job_id, JobStatus.FAILED, error=error)
+                return
             await asyncio.sleep(5)
 
     except asyncio.CancelledError:
@@ -321,17 +568,66 @@ async def _run_job(job_id: str, command: list[str]):
         _active_job = None
 
 
+def _reorder_queue_for_nebius():
+    """Stable-sort the queue so nebius jobs that can reuse the current instance
+    come first. Priority: same gpu+model (free) > same gpu (model swap) >
+    different gpu (instance recreate). Non-nebius jobs keep their position."""
+    if not _nebius:
+        return
+    states = _nebius.get_instance_states()
+    if not states:
+        return
+    current_gpu = states[0].gpu_config
+    current_model = states[0].current_model
+
+    def _sort_key(item: QueuedJob):
+        gpu = _parse_nebius_url(item.server_url)
+        if gpu is None:
+            return 0  # non-nebius, keep in place
+        if gpu == current_gpu and item.model_name == current_model:
+            return 0  # free reuse
+        if gpu == current_gpu:
+            return 1  # model swap only
+        return 2  # instance recreate
+
+    _job_queue.sort(key=_sort_key)
+
+
 async def _worker():
     """Process jobs from the queue one at a time."""
     while True:
         await _job_event.wait()
         _job_event.clear()
         while _job_queue:
-            job_id, command = _job_queue.pop(0)
+            _reorder_queue_for_nebius()
+            job_id, command, server_url, model_name = _job_queue.pop(0)
             row = job_store.get(job_id)
             if not row or row["status"] != JobStatus.QUEUED.value:
                 continue
+
+            # For nebius jobs: provision instance, swap model, patch the command
+            model_config: ModelConfig | None = None
+            nebius_instance_name: str | None = None
+            nebius_gpu_config = _parse_nebius_url(server_url)
+            if nebius_gpu_config is not None and _nebius:
+                try:
+                    nebius_instance_name, real_url = await _nebius.acquire_instance(model_name, gpu_config=nebius_gpu_config)
+                    command = [real_url if arg == server_url else arg for arg in command]
+                    model_config = MODEL_REGISTRY.get(model_name)
+                    await _nebius.mark_job_started(nebius_instance_name)
+                except Exception as e:
+                    logger.exception(f"Nebius provisioning failed for job {job_id}")
+                    job_store.update_status(job_id, JobStatus.FAILED, error=f"Nebius provisioning failed: {e}")
+                    continue
+
+            # Add "--model-max-len" arg to the command to match served model max len, if not already present
+            if "--model-max-len" not in command and model_config is not None:
+                command += ["--model-max-len", str(model_config.model_max_len)]
+
             await _run_job(job_id, command)
+
+            if nebius_instance_name and _nebius:
+                await _nebius.mark_job_completed(nebius_instance_name)
 
 @router.get("/")
 async def read_root():
@@ -345,7 +641,7 @@ async def ui():
     Intentionally left accessible to unauthenticated users as it does not expose any secret information
     or allow users to modify any job.
     """
-    columns = ["job_id", "job_name", "agent", "dataset", "model_name", "status", "error"]
+    columns = ["job_id", "job_name", "agent", "dataset", "model_name", "server_url", "status", "error"]
 
     def build_table(title: str, jobs: list[dict]) -> str:
         header = "".join(f"<th>{col}</th>" for col in columns)
@@ -359,8 +655,37 @@ async def ui():
 
     running = job_store.list(JobStatus.RUNNING) + job_store.list(JobStatus.CANCELLING)
     queued = job_store.list(JobStatus.QUEUED)
-    completed = job_store.list(JobStatus.COMPLETED) + job_store.list(JobStatus.CANCELLED)
+    completed = job_store.list(JobStatus.COMPLETED) + job_store.list(JobStatus.FAILED) + job_store.list(JobStatus.CANCELLED)
     completed.reverse()
+
+    # Build Nebius instances section if enabled
+    nebius_section = ""
+    if _nebius:
+        states = _nebius.get_instance_states()
+        nebius_cols = ["Instance Name", "GPU Config", "Current Model", "Status", "Last Job Completed"]
+        nebius_header = "".join(f"<th>{c}</th>" for c in nebius_cols)
+        nebius_rows = ""
+        for s in states:
+            if s.provisioning_model:
+                status = f"Starting model: {html.escape(s.provisioning_model)}"
+            elif s.job_running:
+                status = "Running job"
+            else:
+                status = "Idle"
+            last_completed = (
+                time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(s.last_job_completed_at))
+                if s.last_job_completed_at else "—"
+            )
+            nebius_rows += (
+                f"<tr><td>{html.escape(s.instance_name)}</td>"
+                f"<td>{html.escape(s.gpu_config)}</td>"
+                f"<td>{html.escape(s.current_model or '—')}</td>"
+                f"<td>{status}</td>"
+                f"<td>{last_completed}</td></tr>"
+            )
+        if not states:
+            nebius_rows = f'<tr><td colspan="{len(nebius_cols)}">No instances</td></tr>'
+        nebius_section = f"<h2>Nebius Instances</h2><table><tr>{nebius_header}</tr>{nebius_rows}</table>"
 
     html_page = f"""<!DOCTYPE html>
 <html>
@@ -376,6 +701,7 @@ th {{ background: #f5f5f5; }}
 </head>
 <body>
 <h1>Job Queue</h1>
+{nebius_section}
 {build_table("Running", running)}
 {build_table("Queued", queued)}
 {build_table("Completed", completed)}
@@ -416,30 +742,40 @@ def build_cli_command(req: CreateJobRequest):
 @router.post("/jobs", response_model=CreateJobResponse)
 async def create_job(req: CreateJobRequest):
     """Create a new benchmark job."""
-    # Verify the harbor command
-    try:
-        HarborCommandBuilder().build(
-            agent=req.agent,
-            dataset=req.dataset,
-            model_name=req.model_name,
-            server_url=req.server_url,
-            environment="openshift",
-            dataset_pattern=req.dataset_pattern,
-            n_concurrent=req.n_concurrent,
-            n_tasks=req.n_tasks,
-            model_max_len=req.model_max_len,
-            job_name=req.job_name,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    
-    # Build the CLI comand
+    # Skip harbor command validation for nebius jobs (server_url is a placeholder)
+    nebius_gpu_config = _parse_nebius_url(req.server_url)
+    if nebius_gpu_config is not None:
+        if not _nebius:
+            raise HTTPException(status_code=400, detail="Nebius is not enabled on this server")
+        if nebius_gpu_config not in RESOURCE_CONFIG_REGISTRY:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown resource config '{nebius_gpu_config}'. Choose from: {', '.join(RESOURCE_CONFIG_REGISTRY)}",
+            )
+    else:
+        try:
+            HarborCommandBuilder().build(
+                agent=req.agent,
+                dataset=req.dataset,
+                model_name=req.model_name,
+                server_url=req.server_url,
+                environment="openshift",
+                dataset_pattern=req.dataset_pattern,
+                n_concurrent=req.n_concurrent,
+                n_tasks=req.n_tasks,
+                model_max_len=req.model_max_len,
+                job_name=req.job_name,
+            )
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    # Build the CLI command
     command = build_cli_command(req=req)
 
     # Start the job
     job_id = str(uuid.uuid4())
-    job_store.insert(job_id, req.job_name, req.agent.value, req.dataset, req.model_name, command)
-    _job_queue.append((job_id, command))
+    job_store.insert(job_id, req.job_name, req.agent.value, req.dataset, req.model_name, req.server_url, command)
+    _job_queue.append(QueuedJob(job_id, command, req.server_url, req.model_name))
     _job_event.set()
 
     # Return a success response
@@ -471,8 +807,8 @@ async def delete_job(job_id: str):
         raise HTTPException(status_code=400, detail=f"Job already {job_row['status']}")
 
     # Remove from queue if still waiting
-    for i, (qid, _) in enumerate(_job_queue):
-        if qid == job_id:
+    for i, queued in enumerate(_job_queue):
+        if queued.job_id == job_id:
             _job_queue.pop(i)
             job_store.update_status(job_id, JobStatus.CANCELLED)
             return {"message": "Job cancelled", "job_id": job_id}
@@ -564,11 +900,13 @@ async def resume_job(job_id: str, req: ResumeJobRequest = ResumeJobRequest()):
     )
 
     command = ["sh", "-c", shell_command]
+    # Resume jobs inherit the original job's server_url
+    original_server_url = job_row.get("server_url", "")
     job_store.insert(
         resume_job_id, resume_job_name, job_row["agent"],
-        job_row["dataset"], job_row["model_name"], command,
+        job_row["dataset"], job_row["model_name"], original_server_url, command,
     )
-    _job_queue.append((resume_job_id, command))
+    _job_queue.append(QueuedJob(resume_job_id, command, original_server_url, job_row["model_name"]))
     _job_event.set()
 
     return {
