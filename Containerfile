@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl git openss
     chmod +x /usr/local/bin/mc && \
     curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | bash && \
     ln -s /home/harbor/.nebius/bin/nebius /usr/local/bin/nebius && \
+    chown -R 1001:1001 /home/harbor/.nebius && \
     apt-get remove -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip uv
