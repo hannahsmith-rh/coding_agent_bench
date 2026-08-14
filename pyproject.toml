@@ -23,6 +23,8 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "bump-my-version>=1.5.1",
+    "bump2version>=1.0.1",
     "ruff>=0.15.12",
 ]
 
