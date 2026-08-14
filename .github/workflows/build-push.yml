@@ -8,6 +8,10 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag (e.g. v0.1.0). Defaults to branch-based tag.'
+        required: false
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
@@ -33,7 +37,9 @@ jobs:
       - name: Set image tag
         id: tag
         run: |
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            echo "branch=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
             echo "branch=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           elif [ "$GITHUB_REF_NAME" = "main" ]; then
             echo "branch=latest" >> "$GITHUB_OUTPUT"
