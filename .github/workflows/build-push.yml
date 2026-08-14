@@ -9,6 +9,9 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
+      ref:
+        description: 'Git ref to build (commit SHA, tag, branch). Defaults to the triggered ref.'
+        required: false
       image_tag:
         description: 'Image tag (e.g. v0.1.0). Defaults to branch-based tag.'
         required: false
@@ -26,6 +29,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
