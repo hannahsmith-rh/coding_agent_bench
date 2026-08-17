@@ -4,6 +4,7 @@ import os
 import httpx
 
 from coding_agent_bench.intake.config import (
+    AUTO_APPROVE,
     Column,
     Status,
     DEFAULT_MODEL_MAX_LEN,
@@ -78,7 +79,7 @@ def process_rows(
             if status in TERMINAL_STATUSES:
                 continue
 
-            if not status:
+            if status == Status.APPROVED.value or (not status and AUTO_APPROVE):
                 _handle_new_row(
                     sheets, row, row_num, api_base_url, api_key,
                     sender_email, gmail_credentials_path,

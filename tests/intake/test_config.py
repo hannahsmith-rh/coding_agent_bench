@@ -1,6 +1,7 @@
 from coding_agent_bench.intake.config import (
     ALLOWED_AGENTS,
     ALLOWED_DATASETS,
+    AUTO_APPROVE,
     DEFAULT_N_CONCURRENT,
     DEFAULT_MODEL_MAX_LEN,
     Column,
@@ -44,7 +45,12 @@ def test_column_enum_has_all_columns():
         assert hasattr(Column, col)
 
 
+def test_auto_approve_defaults_to_false():
+    assert AUTO_APPROVE is False
+
+
 def test_status_enum_values():
+    assert Status.APPROVED.value == "Approved"
     assert Status.QUEUED.value == "Queued"
     assert Status.RUNNING.value == "Running"
     assert Status.COMPLETED.value == "Completed"

@@ -19,11 +19,61 @@ def _make_row(**overrides) -> list[str]:
 
 @patch("coding_agent_bench.intake.poller.send_queued_email")
 @patch("coding_agent_bench.intake.poller.httpx")
-def test_new_valid_row_is_submitted(mock_httpx, mock_email):
+def test_approved_row_is_submitted(mock_httpx, mock_email):
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
         "job_id": "uuid-123",
+        "job_name": "codex_swe-bench-verified_Qwen3-32B",
+        "message": "Job created.",
+        "command": ["coding-agent-bench", "run"],
+    }
+    mock_httpx.post.return_value = mock_response
+
+    sheets = MagicMock()
+    sheets.get_all_rows.return_value = [_make_row(STATUS=Status.APPROVED.value)]
+
+    process_rows(
+        sheets=sheets,
+        api_base_url="http://job-queue-service",
+        api_key="test-key",
+        sender_email="bench@example.com",
+        gmail_credentials_path="/fake/path.json",
+    )
+
+    mock_httpx.post.assert_called_once()
+    post_call = mock_httpx.post.call_args
+    assert "/jobs" in post_call[0][0]
+
+    sheets.update_cell.assert_any_call(1, Column.STATUS, Status.QUEUED.value)
+    sheets.update_cell.assert_any_call(1, Column.JOB_ID, "uuid-123")
+
+
+@patch("coding_agent_bench.intake.poller.httpx")
+def test_empty_status_row_skipped_in_manual_mode(mock_httpx):
+    sheets = MagicMock()
+    sheets.get_all_rows.return_value = [_make_row()]
+
+    process_rows(
+        sheets=sheets,
+        api_base_url="http://job-queue-service",
+        api_key="test-key",
+        sender_email="bench@example.com",
+        gmail_credentials_path="/fake/path.json",
+    )
+
+    mock_httpx.post.assert_not_called()
+    sheets.update_cell.assert_not_called()
+
+
+@patch("coding_agent_bench.intake.poller.AUTO_APPROVE", True)
+@patch("coding_agent_bench.intake.poller.send_queued_email")
+@patch("coding_agent_bench.intake.poller.httpx")
+def test_empty_status_row_submitted_when_auto_approve(mock_httpx, mock_email):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "job_id": "uuid-456",
         "job_name": "codex_swe-bench-verified_Qwen3-32B",
         "message": "Job created.",
         "command": ["coding-agent-bench", "run"],
@@ -42,18 +92,17 @@ def test_new_valid_row_is_submitted(mock_httpx, mock_email):
     )
 
     mock_httpx.post.assert_called_once()
-    post_call = mock_httpx.post.call_args
-    assert "/jobs" in post_call[0][0]
-
     sheets.update_cell.assert_any_call(1, Column.STATUS, Status.QUEUED.value)
-    sheets.update_cell.assert_any_call(1, Column.JOB_ID, "uuid-123")
+    sheets.update_cell.assert_any_call(1, Column.JOB_ID, "uuid-456")
 
 
 @patch("coding_agent_bench.intake.poller.send_queued_email")
 @patch("coding_agent_bench.intake.poller.httpx")
-def test_invalid_row_marked_needs_review(mock_httpx, mock_email):
+def test_invalid_approved_row_marked_needs_review(mock_httpx, mock_email):
     sheets = MagicMock()
-    sheets.get_all_rows.return_value = [_make_row(AGENT="bad-agent")]
+    sheets.get_all_rows.return_value = [
+        _make_row(STATUS=Status.APPROVED.value, AGENT="bad-agent"),
+    ]
 
     process_rows(
         sheets=sheets,

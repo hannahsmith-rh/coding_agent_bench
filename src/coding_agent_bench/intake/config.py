@@ -1,3 +1,4 @@
+import os
 from enum import Enum
 
 from coding_agent_bench.builder import SupportedAgent
@@ -13,6 +14,7 @@ ALLOWED_DATASETS: set[str] = {
 
 DEFAULT_N_CONCURRENT: int = 1
 DEFAULT_MODEL_MAX_LEN: int = 262000
+AUTO_APPROVE: bool = os.environ.get("AUTO_APPROVE", "false").lower() == "true"
 
 
 class Column(int, Enum):
@@ -30,6 +32,7 @@ class Column(int, Enum):
 
 
 class Status(str, Enum):
+    APPROVED = "Approved"
     QUEUED = "Queued"
     RUNNING = "Running"
     COMPLETED = "Completed"

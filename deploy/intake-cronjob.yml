@@ -45,6 +45,8 @@ spec:
                 secretKeyRef:
                   name: intake-poller-secret
                   key: SENDER_EMAIL
+            - name: AUTO_APPROVE
+              value: "false"
             resources:
               requests:
                 cpu: "100m"
