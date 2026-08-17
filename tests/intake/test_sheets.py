@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from coding_agent_bench.intake.config import Column
 from coding_agent_bench.intake.sheets import SheetsClient

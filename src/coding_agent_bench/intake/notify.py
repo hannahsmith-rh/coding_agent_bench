@@ -1,5 +1,6 @@
 import base64
 from email.mime.text import MIMEText
+from typing import Any
 
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -7,7 +8,7 @@ from googleapiclient.discovery import build
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 
 
-def _build_gmail_service(credentials_path: str, sender: str):
+def _build_gmail_service(credentials_path: str, sender: str) -> Any:
     creds = Credentials.from_service_account_file(
         credentials_path,
         scopes=GMAIL_SCOPES,

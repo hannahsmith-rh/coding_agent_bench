@@ -1,6 +1,5 @@
 import logging
 import os
-import sys
 
 import httpx
 
@@ -72,21 +71,25 @@ def process_rows(
 
     for i, row in enumerate(rows):
         row_num = i + 1
-        status = row[Column.STATUS].strip()
 
-        if status in TERMINAL_STATUSES:
-            continue
+        try:
+            status = row[Column.STATUS].strip()
 
-        if not status:
-            _handle_new_row(
-                sheets, row, row_num, api_base_url, api_key,
-                sender_email, gmail_credentials_path,
-            )
-        elif status in (Status.QUEUED.value, Status.RUNNING.value):
-            _handle_inflight_row(
-                sheets, row, row_num, api_base_url, api_key,
-                sender_email, gmail_credentials_path,
-            )
+            if status in TERMINAL_STATUSES:
+                continue
+
+            if not status:
+                _handle_new_row(
+                    sheets, row, row_num, api_base_url, api_key,
+                    sender_email, gmail_credentials_path,
+                )
+            elif status in (Status.QUEUED.value, Status.RUNNING.value):
+                _handle_inflight_row(
+                    sheets, row, row_num, api_base_url, api_key,
+                    sender_email, gmail_credentials_path,
+                )
+        except Exception:
+            logger.exception("Failed to process row %d", row_num)
 
 
 def _handle_new_row(
@@ -121,8 +124,8 @@ def _handle_new_row(
         return
 
     job_id = result["job_id"]
-    sheets.update_cell(row_num, Column.STATUS, Status.QUEUED.value)
     sheets.update_cell(row_num, Column.JOB_ID, job_id)
+    sheets.update_cell(row_num, Column.STATUS, Status.QUEUED.value)
 
     try:
         send_queued_email(email, agent, dataset, model_name, job_id, sender_email, gmail_credentials_path)

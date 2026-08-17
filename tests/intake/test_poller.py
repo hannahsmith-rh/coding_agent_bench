@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 from coding_agent_bench.intake.config import Column, Status
 from coding_agent_bench.intake.poller import process_rows

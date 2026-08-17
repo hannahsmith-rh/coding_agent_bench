@@ -11,8 +11,8 @@ ALLOWED_DATASETS: set[str] = {
     "swe-bench",
 }
 
-DEFAULT_N_CONCURRENT = 1
-DEFAULT_MODEL_MAX_LEN = 262000
+DEFAULT_N_CONCURRENT: int = 1
+DEFAULT_MODEL_MAX_LEN: int = 262000
 
 
 class Column(int, Enum):
