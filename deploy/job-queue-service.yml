@@ -43,7 +43,8 @@ spec:
         args:
           - |
             mkdir -p ~/.ssh && \
-            [ -f /app/data/nebius-ssh-key ] || ssh-keygen -t ed25519 -f /app/data/nebius-ssh-key -N "" -q && \
+            ([ -f /app/data/nebius-ssh-key ] || ssh-keygen -t ed25519 -f /app/data/nebius-ssh-key -N "" -q) && \
+            chmod 600 /app/data/nebius-ssh-key && \
             NEBIUS_SSH_PUBLIC_KEY_PATH=/app/data/nebius-ssh-key.pub \
             NEBIUS_SSH_PRIVATE_KEY_PATH=/app/data/nebius-ssh-key \
             uv run uvicorn coding_agent_bench.api:app --host 0.0.0.0 --port 8000
