@@ -8,7 +8,7 @@ def _make_row(**overrides) -> list[str]:
     row = [""] * len(Column)
     row[Column.TIMESTAMP] = "2026-08-17 10:00:00"
     row[Column.AGENT] = "codex"
-    row[Column.DATASET] = "swe-bench-verified"
+    row[Column.DATASET] = "swe-bench/swe-bench-verified"
     row[Column.MODEL_NAME] = "Qwen/Qwen3-32B"
     row[Column.SERVER_URL] = "https://vllm.example.com"
     row[Column.EMAIL] = "user@example.com"
@@ -24,7 +24,7 @@ def test_approved_row_is_submitted(mock_httpx, mock_email):
     mock_response.status_code = 200
     mock_response.json.return_value = {
         "job_id": "uuid-123",
-        "job_name": "codex_swe-bench-verified_Qwen3-32B",
+        "job_name": "codex_swe-bench/swe-bench-verified_Qwen3-32B",
         "message": "Job created.",
         "command": ["coding-agent-bench", "run"],
     }
@@ -74,7 +74,7 @@ def test_empty_status_row_submitted_when_auto_approve(mock_httpx, mock_email):
     mock_response.status_code = 200
     mock_response.json.return_value = {
         "job_id": "uuid-456",
-        "job_name": "codex_swe-bench-verified_Qwen3-32B",
+        "job_name": "codex_swe-bench/swe-bench-verified_Qwen3-32B",
         "message": "Job created.",
         "command": ["coding-agent-bench", "run"],
     }
@@ -125,7 +125,7 @@ def test_queued_row_updated_to_completed(mock_httpx, mock_email):
         "job_id": "uuid-123",
         "job_name": "test",
         "agent": "codex",
-        "dataset": "swe-bench-verified",
+        "dataset": "swe-bench/swe-bench-verified",
         "model_name": "Qwen/Qwen3-32B",
         "command": "[]",
         "status": "completed",
@@ -158,7 +158,7 @@ def test_running_row_updated_to_failed(mock_httpx, mock_email):
         "job_id": "uuid-123",
         "job_name": "test",
         "agent": "codex",
-        "dataset": "swe-bench-verified",
+        "dataset": "swe-bench/swe-bench-verified",
         "model_name": "Qwen/Qwen3-32B",
         "command": "[]",
         "status": "failed",

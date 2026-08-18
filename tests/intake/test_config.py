@@ -59,10 +59,10 @@ def test_status_enum_values():
 
 
 def test_generate_job_name_simple():
-    result = generate_job_name("codex", "swe-bench-verified", "Qwen/Qwen3-32B")
-    assert result == "codex_swe-bench-verified_Qwen3-32B"
+    result = generate_job_name("codex", "swe-bench/swe-bench-verified", "Qwen/Qwen3-32B")
+    assert result == "codex_swe-bench/swe-bench-verified_Qwen3-32B"
 
 
 def test_generate_job_name_no_org_prefix():
-    result = generate_job_name("pi", "swe-bench-verified", "Qwen3-32B")
-    assert result == "pi_swe-bench-verified_Qwen3-32B"
+    result = generate_job_name("pi", "swe-bench/swe-bench-verified", "Qwen3-32B")
+    assert result == "pi_swe-bench/swe-bench-verified_Qwen3-32B"

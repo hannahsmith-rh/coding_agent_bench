@@ -23,7 +23,7 @@ def test_send_queued_email_contains_job_details(mock_build):
     send_queued_email(
         to="user@example.com",
         agent="codex",
-        dataset="swe-bench-verified",
+        dataset="swe-bench/swe-bench-verified",
         model_name="Qwen/Qwen3-32B",
         job_id="abc-123",
         sender="bench@example.com",
@@ -33,7 +33,7 @@ def test_send_queued_email_contains_job_details(mock_build):
     mock_service.users().messages().send.assert_called_once()
     body = _extract_email_body(mock_service)
     assert "codex" in body
-    assert "swe-bench-verified" in body
+    assert "swe-bench/swe-bench-verified" in body
     assert "abc-123" in body
 
 

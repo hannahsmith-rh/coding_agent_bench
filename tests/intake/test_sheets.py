@@ -9,7 +9,7 @@ def test_get_all_rows_pads_short_rows():
     mock_sheet.get_all_values.return_value = [
         ["Timestamp", "Agent", "Dataset", "Model", "URL", "Email",
          "Status", "Job ID", "Error", "Notified Queued", "Notified Done"],
-        ["2026-08-17", "codex", "swe-bench-verified", "Qwen/Qwen3-32B",
+        ["2026-08-17", "codex", "swe-bench/swe-bench-verified", "Qwen/Qwen3-32B",
          "https://vllm.example.com", "user@example.com"],
     ]
 

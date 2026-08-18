@@ -7,9 +7,8 @@ from coding_agent_bench.builder import SupportedAgent
 ALLOWED_AGENTS: set[str] = {a.value for a in SupportedAgent}
 
 ALLOWED_DATASETS: set[str] = {
-    "swe-bench-verified",
-    "swe-bench-lite",
-    "swe-bench",
+    "swe-bench/swe-bench-verified",
+    "scale-ai/swe-bench-pro",
 }
 
 DEFAULT_N_CONCURRENT: int = 1

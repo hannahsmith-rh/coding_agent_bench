@@ -4,7 +4,7 @@ from coding_agent_bench.intake.validation import validate_row
 def test_valid_row_returns_no_errors():
     errors = validate_row(
         agent="codex",
-        dataset="swe-bench-verified",
+        dataset="swe-bench/swe-bench-verified",
         server_url="https://vllm.example.com",
     )
     assert errors == []
@@ -13,7 +13,7 @@ def test_valid_row_returns_no_errors():
 def test_unknown_agent():
     errors = validate_row(
         agent="not-a-real-agent",
-        dataset="swe-bench-verified",
+        dataset="swe-bench/swe-bench-verified",
         server_url="https://vllm.example.com",
     )
     assert len(errors) == 1
@@ -33,7 +33,7 @@ def test_unknown_dataset():
 def test_invalid_url_no_scheme():
     errors = validate_row(
         agent="codex",
-        dataset="swe-bench-verified",
+        dataset="swe-bench/swe-bench-verified",
         server_url="vllm.example.com",
     )
     assert len(errors) == 1
@@ -43,7 +43,7 @@ def test_invalid_url_no_scheme():
 def test_invalid_url_http_not_https():
     errors = validate_row(
         agent="codex",
-        dataset="swe-bench-verified",
+        dataset="swe-bench/swe-bench-verified",
         server_url="http://vllm.example.com",
     )
     assert len(errors) == 1
@@ -53,7 +53,7 @@ def test_invalid_url_http_not_https():
 def test_empty_url():
     errors = validate_row(
         agent="codex",
-        dataset="swe-bench-verified",
+        dataset="swe-bench/swe-bench-verified",
         server_url="",
     )
     assert len(errors) >= 1
