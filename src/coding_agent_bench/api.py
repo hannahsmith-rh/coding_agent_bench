@@ -612,7 +612,17 @@ async def _worker():
             if nebius_gpu_config is not None and _nebius:
                 try:
                     nebius_instance_name, real_url = await _nebius.acquire_instance(model_name, gpu_config=nebius_gpu_config)
-                    command = [real_url if arg == server_url else arg for arg in command]
+                    is_resume = len(command) == 3 and command[0] == "sh" and command[1] == "-c"
+                    if is_resume:
+                        # Inject URL replacement into the resume shell command
+                        job_name = row["job_name"]
+                        orig_name = job_name.removesuffix("--resume")
+                        py_job_dir = f"/app/jobs/{orig_name}"
+                        step = _build_url_replace_shell_step(real_url, py_job_dir)
+                        command = list(command)
+                        command[2] = command[2].replace(" && uv run", f"{step} && uv run", 1)
+                    else:
+                        command = [real_url if arg == server_url else arg for arg in command]
                     model_config = MODEL_REGISTRY.get(model_name)
                     await _nebius.mark_job_started(nebius_instance_name)
                 except Exception as e:
@@ -821,6 +831,56 @@ async def delete_job(job_id: str):
 
     return {"message": "Job cancelled", "job_id": job_id}
 
+def _build_url_replace_shell_step(server_url: str, py_job_dir: str) -> str:
+    """Build shell step that replaces model server URLs in downloaded job files."""
+    new_host = urlparse(server_url.rstrip("/")).netloc
+    new_domain = ".".join(new_host.rsplit(".", 2)[-2:])
+    replace_lines = [
+        "import os, json, re",
+        f"job_dir = {json.dumps(py_job_dir)}",
+        f"new_host = {json.dumps(new_host)}",
+        f"new_domain = {json.dumps(new_domain)}",
+        "config_path = os.path.join(job_dir, 'config.json')",
+        "if not os.path.exists(config_path): exit(0)",
+        "with open(config_path) as f: c = json.load(f)",
+        "envs = c.get('agents', [{}])[0].get('env', {})",
+        "hosts = set()",
+        "for v in envs.values():",
+        "    if not isinstance(v, str): continue",
+        "    for m in re.finditer('https?://([^\"\\\\s,}/]+)', v):",
+        "        hosts.add(m.group(1).split('/')[0])",
+        "hosts = [h for h in hosts if h != new_host and h.endswith(new_domain)]",
+        "replaced = 0",
+        "if hosts:",
+        "    for root, dirs, files in os.walk(job_dir):",
+        "        for file in files:",
+        "            if not file.endswith('.json'): continue",
+        "            path = os.path.join(root, file)",
+        "            with open(path, 'r') as f: content = f.read()",
+        "            orig = content",
+        "            for h in hosts: content = content.replace(h, new_host)",
+        "            if content != orig:",
+        "                with open(path, 'w') as f: f.write(content)",
+        "                replaced += 1",
+        "print(f'Replaced URL in {replaced} files')",
+        "# Regenerate Pi/Codex mount files with new URL",
+        f"server_url = {json.dumps(server_url)}",
+        "agent = c.get('agents', [{}])[0]",
+        "model_name = agent.get('model_name', '')",
+        "mounts = c.get('environment', {}).get('mounts', [])",
+        "for m in mounts:",
+        "    src, tgt = m.get('source',''), m.get('target','')",
+        "    if agent.get('name') == 'pi' and 'models.json' in tgt:",
+        "        json.dump({'providers': {'vllm': {'baseUrl': server_url, 'api': 'openai-completions', 'apiKey': 'NONE', 'models': [{'id': model_name, 'name': model_name}]}}}, open(src, 'w'))",
+        "        print('Regenerated Pi models.json')",
+        "    if agent.get('name') == 'codex' and 'config.toml' in tgt:",
+        "        open(src, 'w').write(f'[api]\\nbase_url = \"{server_url}\"\\napi_key = \"sk-no-key\"\\n[model]\\nmodel_id = \"{model_name}\"\\n')",
+        "        print('Regenerated Codex config.toml')",
+    ]
+    replace_script = "\n".join(replace_lines)
+    return f" && python3 -c {shlex.quote(replace_script)}"
+
+
 @router.post("/jobs/{job_id}/resume")
 async def resume_job(job_id: str, req: ResumeJobRequest = ResumeJobRequest()):
     """Resume a completed/failed job by retrying errored tasks via harbor jobs resume."""
@@ -837,58 +897,28 @@ async def resume_job(job_id: str, req: ResumeJobRequest = ResumeJobRequest()):
     resume_job_id = str(uuid.uuid4())
     resume_job_name = f"{original_job_name}--resume"
 
+    original_server_url = job_row.get("server_url", "")
+    effective_server_url = req.server_url or original_server_url
+
+    # Validate nebius URLs the same way create_job does
+    nebius_gpu_config = _parse_nebius_url(effective_server_url)
+    if nebius_gpu_config is not None:
+        if not _nebius:
+            raise HTTPException(status_code=400, detail="Nebius is not enabled on this server")
+        if nebius_gpu_config not in RESOURCE_CONFIG_REGISTRY:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown resource config '{nebius_gpu_config}'. Choose from: {', '.join(RESOURCE_CONFIG_REGISTRY)}",
+            )
+
     filter_flags = "".join(f" -f {shlex.quote(t)}" for t in req.filter_error_types)
     job_dir = f"/app/jobs/{shlex.quote(original_job_name)}"
     py_job_dir = f"/app/jobs/{original_job_name}"
 
+    # For nebius URLs, URL replacement is deferred to the worker (real URL not known yet)
     url_replace_step = ""
-    if req.server_url:
-        new_host = urlparse(req.server_url.rstrip("/")).netloc
-        new_domain = ".".join(new_host.rsplit(".", 2)[-2:])
-        replace_lines = [
-            "import os, json, re",
-            f"job_dir = {json.dumps(py_job_dir)}",
-            f"new_host = {json.dumps(new_host)}",
-            f"new_domain = {json.dumps(new_domain)}",
-            "config_path = os.path.join(job_dir, 'config.json')",
-            "if not os.path.exists(config_path): exit(0)",
-            "with open(config_path) as f: c = json.load(f)",
-            "envs = c.get('agents', [{}])[0].get('env', {})",
-            "hosts = set()",
-            "for v in envs.values():",
-            "    if not isinstance(v, str): continue",
-            "    for m in re.finditer('https?://([^\"\\\\s,}/]+)', v):",
-            "        hosts.add(m.group(1).split('/')[0])",
-            "hosts = [h for h in hosts if h != new_host and h.endswith(new_domain)]",
-            "replaced = 0",
-            "if hosts:",
-            "    for root, dirs, files in os.walk(job_dir):",
-            "        for file in files:",
-            "            if not file.endswith('.json'): continue",
-            "            path = os.path.join(root, file)",
-            "            with open(path, 'r') as f: content = f.read()",
-            "            orig = content",
-            "            for h in hosts: content = content.replace(h, new_host)",
-            "            if content != orig:",
-            "                with open(path, 'w') as f: f.write(content)",
-            "                replaced += 1",
-            "print(f'Replaced URL in {replaced} files')",
-            "# Regenerate Pi/Codex mount files with new URL",
-            f"server_url = {json.dumps(req.server_url)}",
-            "agent = c.get('agents', [{}])[0]",
-            "model_name = agent.get('model_name', '')",
-            "mounts = c.get('environment', {}).get('mounts', [])",
-            "for m in mounts:",
-            "    src, tgt = m.get('source',''), m.get('target','')",
-            "    if agent.get('name') == 'pi' and 'models.json' in tgt:",
-            "        json.dump({'providers': {'vllm': {'baseUrl': server_url, 'api': 'openai-completions', 'apiKey': 'NONE', 'models': [{'id': model_name, 'name': model_name}]}}}, open(src, 'w'))",
-            "        print('Regenerated Pi models.json')",
-            "    if agent.get('name') == 'codex' and 'config.toml' in tgt:",
-            "        open(src, 'w').write(f'[api]\\nbase_url = \"{server_url}\"\\napi_key = \"sk-no-key\"\\n[model]\\nmodel_id = \"{model_name}\"\\n')",
-            "        print('Regenerated Codex config.toml')",
-        ]
-        replace_script = "\n".join(replace_lines)
-        url_replace_step = f" && python3 -c {shlex.quote(replace_script)}"
+    if req.server_url and nebius_gpu_config is None:
+        url_replace_step = _build_url_replace_shell_step(req.server_url, py_job_dir)
 
     shell_command = (
         "mc alias set minio http://harbor-minio:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD"
@@ -900,13 +930,11 @@ async def resume_job(job_id: str, req: ResumeJobRequest = ResumeJobRequest()):
     )
 
     command = ["sh", "-c", shell_command]
-    # Resume jobs inherit the original job's server_url
-    original_server_url = job_row.get("server_url", "")
     job_store.insert(
         resume_job_id, resume_job_name, job_row["agent"],
-        job_row["dataset"], job_row["model_name"], original_server_url, command,
+        job_row["dataset"], job_row["model_name"], effective_server_url, command,
     )
-    _job_queue.append(QueuedJob(resume_job_id, command, original_server_url, job_row["model_name"]))
+    _job_queue.append(QueuedJob(resume_job_id, command, effective_server_url, job_row["model_name"]))
     _job_event.set()
 
     return {
