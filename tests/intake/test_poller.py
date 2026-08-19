@@ -116,6 +116,25 @@ def test_invalid_approved_row_marked_needs_review(mock_httpx, mock_email):
     sheets.update_cell.assert_any_call(1, Column.STATUS, Status.NEEDS_REVIEW.value)
 
 
+@patch("coding_agent_bench.intake.poller.httpx")
+def test_approved_row_with_existing_job_id_skips_resubmission(mock_httpx):
+    sheets = MagicMock()
+    sheets.get_all_rows.return_value = [
+        _make_row(STATUS=Status.APPROVED.value, JOB_ID="uuid-existing"),
+    ]
+
+    process_rows(
+        sheets=sheets,
+        api_base_url="http://job-queue-service",
+        api_key="test-key",
+        sender_email="bench@example.com",
+        gmail_credentials_path="/fake/path.json",
+    )
+
+    mock_httpx.post.assert_not_called()
+    sheets.update_cell.assert_called_once_with(1, Column.STATUS, Status.QUEUED.value)
+
+
 @patch("coding_agent_bench.intake.poller.send_completed_email")
 @patch("coding_agent_bench.intake.poller.httpx")
 def test_queued_row_updated_to_completed(mock_httpx, mock_email):

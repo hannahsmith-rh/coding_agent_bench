@@ -47,6 +47,14 @@ spec:
                   key: SENDER_EMAIL
             - name: AUTO_APPROVE
               value: "false"
+            securityContext:
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
+              seccompProfile:
+                type: RuntimeDefault
             resources:
               requests:
                 cpu: "100m"

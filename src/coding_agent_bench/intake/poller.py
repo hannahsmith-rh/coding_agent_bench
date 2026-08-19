@@ -108,6 +108,11 @@ def _handle_new_row(
     server_url = row[Column.SERVER_URL].strip()
     email = row[Column.EMAIL].strip()
 
+    existing_job_id = row[Column.JOB_ID].strip()
+    if existing_job_id:
+        sheets.update_cell(row_num, Column.STATUS, Status.QUEUED.value)
+        return
+
     errors = validate_row(agent, dataset, server_url)
     if errors:
         sheets.update_cell(row_num, Column.STATUS, Status.NEEDS_REVIEW.value)
