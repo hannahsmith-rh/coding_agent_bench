@@ -59,6 +59,15 @@ def test_empty_url():
     assert len(errors) >= 1
 
 
+def test_openrouter_url_accepted():
+    errors = validate_row(
+        agent="codex",
+        dataset="swe-bench/swe-bench-verified",
+        server_url="openrouter",
+    )
+    assert errors == []
+
+
 def test_multiple_errors():
     errors = validate_row(
         agent="bad-agent",

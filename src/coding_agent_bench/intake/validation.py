@@ -16,7 +16,7 @@ def validate_row(agent: str, dataset: str, server_url: str) -> list[str]:
 
     if not server_url:
         errors.append("Server URL is empty")
-    else:
+    elif server_url.lower() != "openrouter":
         parsed = urlparse(server_url)
         if parsed.scheme != "https":
             errors.append(f"Server URL must use https scheme, got '{parsed.scheme or 'none'}'")
