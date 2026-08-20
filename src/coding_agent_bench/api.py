@@ -944,5 +944,10 @@ async def resume_job(job_id: str, req: ResumeJobRequest = ResumeJobRequest()):
         "parent_job_id": job_id,
     }
 
+@router.get("/models")
+async def get_models():
+    """List available models for managed servers."""
+    models = list(MODEL_REGISTRY.keys())
+    return {"models": models}
 
 app.include_router(router)
