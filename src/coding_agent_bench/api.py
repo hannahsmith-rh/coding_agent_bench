@@ -17,6 +17,9 @@ from coding_agent_bench.builder import SupportedAgent, HarborCommandBuilder
 from coding_agent_bench.job import OpenshiftJob
 from coding_agent_bench.nebius_utils import NebiusInstanceManager, RESOURCE_CONFIG_REGISTRY
 from coding_agent_bench.models import ModelConfig, MODEL_REGISTRY
+from coding_agent_bench.agents import AGENT_REGISTRY
+from coding_agent_bench.ui import build_submit_form_html
+from coding_agent_bench import VERSION
 
 import getpass
 import json
@@ -238,7 +241,7 @@ class CreateJobRequest(BaseModel):
     dataset_pattern: Optional[str] = Field(None, description="Pattern to filter dataset tasks")
     n_concurrent: int = Field(1, description="Number of concurrent tasks")
     n_tasks: Optional[int] = Field(None, description="Total number of tasks to run")
-    model_max_len: int = Field(262000, description="Maximum model context length in tokens")
+    model_max_len: Optional[int] = Field(None, description="Maximum model context length in tokens")
     before_script: Optional[str] = Field(None, description="Script to run before harbor job execution")
     agent_version: Optional[str] = Field(None, description="Pin agent to a specific version (overrides default)")
 
@@ -420,6 +423,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(lifespan=lifespan)
 router = APIRouter(dependencies=[Depends(_verify_api_key)])
+
+# Public UI router (no API key required)
+ui_router = APIRouter()
 
 
 async def _run_oc(command: list[str], timeout_sec: int = 30) -> str:
@@ -697,11 +703,53 @@ async def ui():
             nebius_rows = f'<tr><td colspan="{len(nebius_cols)}">No instances</td></tr>'
         nebius_section = f"<h2>Nebius Instances</h2><table><tr>{nebius_header}</tr>{nebius_rows}</table>"
 
+    # Build API key input section
+    api_key_section = """
+<div id="api-key-section" style="margin-bottom: 1.5rem; padding: 0.75rem; border: 1px solid #ddd; border-radius: 8px; background: #fffbe6;">
+    <label for="api-key-input" style="font-weight: bold;">API Key:</label>
+    <input type="password" id="api-key-input" placeholder="Enter your API key"
+           style="margin-left: 0.5rem; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; width: 300px;">
+    <button type="button" onclick="saveApiKey()" style="margin-left: 0.5rem; padding: 0.5rem 1rem; background: #0066cc; color: white; border: none; border-radius: 4px; cursor: pointer;">Save</button>
+    <button type="button" onclick="clearApiKey()" style="margin-left: 0.25rem; padding: 0.5rem 1rem; background: #666; color: white; border: none; border-radius: 4px; cursor: pointer;">Clear</button>
+    <span id="api-key-status" style="margin-left: 1rem;"></span>
+</div>
+<script>
+function saveApiKey() {{
+    const key = document.getElementById('api-key-input').value.trim();
+    if (key) {{
+        localStorage.setItem('coding_agent_bench_api_key', key);
+        document.getElementById('api-key-status').textContent = 'API key saved.';
+        document.getElementById('api-key-status').style.color = 'green';
+    }}
+}}
+function clearApiKey() {{
+    localStorage.removeItem('coding_agent_bench_api_key');
+    document.getElementById('api-key-input').value = '';
+    document.getElementById('api-key-status').textContent = 'API key cleared.';
+    document.getElementById('api-key-status').style.color = '#cc6600';
+}}
+(function() {{
+    const savedKey = localStorage.getItem('coding_agent_bench_api_key');
+    if (savedKey) {{
+        document.getElementById('api-key-input').value = savedKey;
+    }}
+}})();
+</script>
+"""
+
+    # Build submit form with current data
+    nebius_enabled = os.environ.get("NEBIUS_ENABLED") == "1"
+    submit_form_html = build_submit_form_html(
+        models=list(MODEL_REGISTRY.keys()),
+        agents=list(AGENT_REGISTRY.keys()),
+        nebius_configs=list(RESOURCE_CONFIG_REGISTRY.keys()) if nebius_enabled else [],
+        nebius_enabled=nebius_enabled,
+    )
+
     html_page = f"""<!DOCTYPE html>
 <html>
 <head>
 <title>Job Queue</title>
-<meta http-equiv="refresh" content="5">
 <style>
 body {{ font-family: sans-serif; margin: 2rem; }}
 table {{ border-collapse: collapse; width: 100%; margin-bottom: 2rem; }}
@@ -710,7 +758,9 @@ th {{ background: #f5f5f5; }}
 </style>
 </head>
 <body>
-<h1>Job Queue</h1>
+<h1>Job Queue <font size="4">v{VERSION}</font></h1>
+{api_key_section}
+{submit_form_html}
 {nebius_section}
 {build_table("Running", running)}
 {build_table("Queued", queued)}
@@ -950,4 +1000,24 @@ async def get_models():
     models = list(MODEL_REGISTRY.keys())
     return {"models": models}
 
+@ui_router.get("/api/models")
+async def get_models_public():
+    """List available models (public endpoint for UI)."""
+    return {"models": list(MODEL_REGISTRY.keys())}
+
+@ui_router.get("/api/agents")
+async def get_agents():
+    """List available agents (public endpoint for UI)."""
+    return {"agents": list(AGENT_REGISTRY.keys())}
+
+@ui_router.get("/api/nebius-configs")
+async def get_nebius_configs():
+    """List available nebius resource configs (public endpoint for UI)."""
+    nebius_enabled = os.environ.get("NEBIUS_ENABLED") == "1"
+    return {
+        "nebius_enabled": nebius_enabled,
+        "configs": list(RESOURCE_CONFIG_REGISTRY.keys()),
+    }
+
 app.include_router(router)
+app.include_router(ui_router)
