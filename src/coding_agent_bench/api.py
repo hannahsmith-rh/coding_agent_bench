@@ -479,7 +479,7 @@ async def _best_effort_cleanup(oj: OpenshiftJob, signal: bool = False) -> str | 
     return "; ".join(errors) if errors else None
 
 
-async def _run_job(job_id: str, command: list[str]):
+async def _run_job(job_id: str, command: list[str], openrouter: bool = False):
     """Run and monitor an Openshift Job."""
     global _active_job
 
@@ -493,7 +493,7 @@ async def _run_job(job_id: str, command: list[str]):
         if is_resume:
             job_spec = oj._resume_job_spec(command[2])
         else:
-            job_spec = oj._job_spec(command)
+            job_spec = oj._job_spec(command, openrouter=openrouter)
         await oj._run_oc_command(
             ["apply", "-f", "-"],
             stdin_data=json.dumps(job_spec).encode(),
@@ -635,7 +635,7 @@ async def _worker():
             if "--model-max-len" not in command and model_config is not None:
                 command += ["--model-max-len", str(model_config.model_max_len)]
 
-            await _run_job(job_id, command)
+            await _run_job(job_id, command, openrouter=is_openrouter(server_url))
 
             if nebius_instance_name and _nebius:
                 await _nebius.mark_job_completed(nebius_instance_name)
