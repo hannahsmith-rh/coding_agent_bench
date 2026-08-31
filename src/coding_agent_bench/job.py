@@ -51,6 +51,16 @@ class OpenshiftJob:
                                 "args": [shell_command],
                                 "env": [
                                     {"name": "HOME", "value": "/tmp"},
+                                    {
+                                        "name": "OPENROUTER_API_KEY",
+                                        "valueFrom": {
+                                            "secretKeyRef": {
+                                                "name": "openrouter",
+                                                "key": "OPENROUTER_API_KEY",
+                                                "optional": True,
+                                            }
+                                        },
+                                    },
                                 ],
                                 "volumeMounts": [{"name": "jobs", "mountPath": "/app/jobs"}],
                                 "envFrom": [
@@ -87,6 +97,18 @@ class OpenshiftJob:
                                     + " mc alias set minio http://harbor-minio:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD"
                                     + " && mc mb --ignore-existing minio/results"
                                     + " && mc cp --recursive /app/jobs/ minio/results/"
+                                ],
+                                "env": [
+                                    {
+                                        "name": "OPENROUTER_API_KEY",
+                                        "valueFrom": {
+                                            "secretKeyRef": {
+                                                "name": "openrouter",
+                                                "key": "OPENROUTER_API_KEY",
+                                                "optional": True,
+                                            }
+                                        },
+                                    },
                                 ],
                                 "volumeMounts": [{"name": "jobs", "mountPath": "/app/jobs"}],
                                 "envFrom": [
