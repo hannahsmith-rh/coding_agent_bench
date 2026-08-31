@@ -63,7 +63,7 @@ class CodexAgentConfig(AgentConfig):
             model_name=model_name,
             server_url=base_url,
             outpath=outpath,
-            api_key=api_key,
+            openrouter=bool(api_key),
         )
         print(f"Created config.toml at {outpath}")
 

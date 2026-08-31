@@ -26,13 +26,13 @@ def _toml_string(value: str) -> str:
 
 
 def codex_create_toml(
-    model_name: str, server_url: str, outpath: Path, api_key: str | None = None
+    model_name: str, server_url: str, outpath: Path, openrouter: bool = False
 ):
     base_url = server_url.rstrip("/").removesuffix("/v1") + "/v1"
-    if api_key:
+    if openrouter:
         # OpenRouter: chat-completions wire format with key auth. Codex reads the
         # key from the OPENROUTER_API_KEY env var (env_key), so the value itself
-        # is never written into this file.
+        # is never passed to or written by this function.
         wire_api = "chat"
         requires_openai_auth = "true"
         env_key_line = f"env_key = {_toml_string(OPENROUTER_API_KEY_ENV)}\n\n"
