@@ -4,7 +4,11 @@ from pathlib import Path
 
 from coding_agent_bench.agents.base import AgentConfig, AgentConfigResult
 from coding_agent_bench.helpers.codex import codex_create_toml
-from coding_agent_bench.providers import is_openrouter, resolve_provider
+from coding_agent_bench.providers import (
+    OPENROUTER_API_KEY_ENV,
+    is_openrouter,
+    resolve_provider,
+)
 
 
 class OracleAgentConfig(AgentConfig):
@@ -52,9 +56,15 @@ class CodexAgentConfig(AgentConfig):
     def configure(self, **kwargs) -> AgentConfigResult:
         model_name = kwargs["model_name"]
         server_url = kwargs["server_url"]
+        base_url, api_key = resolve_provider(server_url)
 
         outpath = Path("config.toml").absolute()
-        codex_create_toml(model_name=model_name, server_url=server_url, outpath=outpath)
+        codex_create_toml(
+            model_name=model_name,
+            server_url=base_url,
+            outpath=outpath,
+            api_key=api_key,
+        )
         print(f"Created config.toml at {outpath}")
 
         mounts = [
@@ -65,9 +75,13 @@ class CodexAgentConfig(AgentConfig):
             }
         ]
 
+        agent_env = {"CODEX_HOME": "/root/.codex/"}
+        if api_key:
+            agent_env[OPENROUTER_API_KEY_ENV] = api_key
+
         return AgentConfigResult(
             model="vllm/" + model_name,
-            agent_env={"CODEX_HOME": "/root/.codex/"},
+            agent_env=agent_env,
             mounts=mounts,
         )
 
