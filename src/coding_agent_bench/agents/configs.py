@@ -4,6 +4,7 @@ from pathlib import Path
 
 from coding_agent_bench.agents.base import AgentConfig, AgentConfigResult
 from coding_agent_bench.helpers.codex import codex_create_toml
+from coding_agent_bench.providers import is_openrouter, resolve_provider
 
 
 class OracleAgentConfig(AgentConfig):
@@ -12,6 +13,8 @@ class OracleAgentConfig(AgentConfig):
     name = "oracle"
 
     def configure(self, **kwargs) -> AgentConfigResult:
+        if is_openrouter(kwargs["server_url"]):
+            raise ValueError("oracle is a non-LLM agent and cannot use OpenRouter")
         return AgentConfigResult(model=kwargs["model_name"])
 
 
@@ -24,6 +27,11 @@ class ClaudeCodeAgentConfig(AgentConfig):
     def configure(self, **kwargs) -> AgentConfigResult:
         model_name = kwargs["model_name"]
         server_url = kwargs["server_url"]
+        if is_openrouter(server_url):
+            raise ValueError(
+                "claude-code uses the Anthropic API format, which OpenRouter's "
+                "OpenAI-compatible endpoint does not provide"
+            )
         agent_env = {
             "ANTHROPIC_BASE_URL": server_url,
             "ANTHROPIC_API_KEY": "sk-no-key-required",
@@ -73,9 +81,10 @@ class OpenClawAgentConfig(AgentConfig):
     def configure(self, **kwargs) -> AgentConfigResult:
         model_name = kwargs["model_name"]
         server_url = kwargs["server_url"]
+        base_url, api_key = resolve_provider(server_url)
         agent_env = {
-            "OPENAI_BASE_URL": server_url.rstrip("/").removesuffix("/v1") + "/v1",
-            "OPENAI_API_KEY": "sk-no-key-required",
+            "OPENAI_BASE_URL": base_url.rstrip("/").removesuffix("/v1") + "/v1",
+            "OPENAI_API_KEY": api_key or "sk-no-key-required",
         }
         return AgentConfigResult(model="vllm/" + model_name, agent_env=agent_env)
 
@@ -90,10 +99,14 @@ class OpenCodeAgentConfig(AgentConfig):
         model_name = kwargs["model_name"]
         server_url = kwargs["server_url"]
         model_max_len = kwargs.get("model_max_len", 262000)
+        base_url, api_key = resolve_provider(server_url)
 
         model = "vllm/" + model_name
         context_limit = int(model_max_len * 0.75)
         output_limit = int(model_max_len * 0.25)
+        options = {"baseURL": base_url.rstrip("/").removesuffix("/v1") + "/v1"}
+        if api_key:
+            options["apiKey"] = api_key
         opencode_config = {
             "$schema": "https://opencode.ai/config.json",
             "model": model,
@@ -101,10 +114,10 @@ class OpenCodeAgentConfig(AgentConfig):
                 "vllm": {
                     "npm": "@ai-sdk/openai-compatible",
                     "name": "vLLM",
-                    "options": {"baseURL": server_url.rstrip("/").removesuffix("/v1") + "/v1"},
+                    "options": options,
                     "models": {
-                        "qwen3.6-35b": {
-                            "name": "qwen3.6-35b",
+                        model_name: {
+                            "name": model_name,
                             "limit": {"context": context_limit, "output": output_limit},
                         }
                     },
@@ -150,13 +163,14 @@ class PiAgentConfig(AgentConfig):
         model_name = kwargs["model_name"]
         server_url = kwargs["server_url"]
         model_max_len = kwargs.get("model_max_len", 262000)
+        base_url, api_key = resolve_provider(server_url)
 
         models_json = {
             "providers": {
                 "vllm": {
-                    "baseUrl": server_url.rstrip("/").removesuffix("/v1") + "/v1",
+                    "baseUrl": base_url.rstrip("/").removesuffix("/v1") + "/v1",
                     "api": "openai-completions",
-                    "apiKey": "NONE",
+                    "apiKey": api_key or "NONE",
                     "models": [
                         {
                             "id": model_name,
