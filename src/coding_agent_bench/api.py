@@ -234,7 +234,7 @@ class CreateJobRequest(BaseModel):
     agent: SupportedAgent = Field(..., description="Agent to use")
     dataset: str = Field(..., description="Dataset name or path")
     model_name: str = Field(..., description="Model name")
-    server_url: str = Field(..., description="Model server URL, or 'nebius-<resource>' (e.g. nebius-h200) for managed Nebius instances")
+    server_url: str = Field(..., description="Model server URL; 'nebius-<resource>' (e.g. nebius-h200) for managed Nebius instances; or 'openrouter' to use OpenRouter (requires OPENROUTER_API_KEY on the server)")
     dataset_pattern: Optional[str] = Field(None, description="Pattern to filter dataset tasks")
     n_concurrent: int = Field(1, description="Number of concurrent tasks")
     n_tasks: Optional[int] = Field(None, description="Total number of tasks to run")
