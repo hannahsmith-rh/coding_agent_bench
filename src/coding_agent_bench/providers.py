@@ -4,6 +4,13 @@ OPENROUTER_SENTINEL = "openrouter"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY"
 
+# Agents (SupportedAgent.value strings) that cannot use OpenRouter. This is
+# only a fast, request-time 400 for create_job's lightweight openrouter
+# validation branch; the authoritative guards live in each agent's own
+# configure() (see OracleAgentConfig / ClaudeCodeAgentConfig), which still
+# raise ValueError at build/run time regardless of this constant.
+OPENROUTER_UNSUPPORTED_AGENTS = frozenset({"oracle", "claude-code"})
+
 
 def is_openrouter(server_url: str) -> bool:
     """Return True if server_url is the OpenRouter sentinel."""

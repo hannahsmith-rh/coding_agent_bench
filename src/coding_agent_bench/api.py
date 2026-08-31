@@ -17,6 +17,7 @@ from coding_agent_bench.builder import SupportedAgent, HarborCommandBuilder
 from coding_agent_bench.job import OpenshiftJob
 from coding_agent_bench.nebius_utils import NebiusInstanceManager, RESOURCE_CONFIG_REGISTRY
 from coding_agent_bench.models import ModelConfig, MODEL_REGISTRY
+from coding_agent_bench.providers import is_openrouter, resolve_provider, OPENROUTER_UNSUPPORTED_AGENTS
 
 import getpass
 import json
@@ -762,6 +763,18 @@ async def create_job(req: CreateJobRequest):
                 status_code=400,
                 detail=f"Unknown resource config '{nebius_gpu_config}'. Choose from: {', '.join(RESOURCE_CONFIG_REGISTRY)}",
             )
+    elif is_openrouter(req.server_url):
+        # Skip HarborCommandBuilder().build() for openrouter jobs: build() runs
+        # each agent's configure(), and PiAgentConfig.configure() writes the
+        # real OpenRouter key to models.json on the API host's CWD as a side
+        # effect. Validate cheaply instead, deferring dataset-existence checks
+        # to run time (same trade-off as the nebius branch above).
+        try:
+            resolve_provider(req.server_url)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if req.agent.value in OPENROUTER_UNSUPPORTED_AGENTS:
+            raise HTTPException(status_code=400, detail=f"agent '{req.agent.value}' cannot use OpenRouter")
     else:
         try:
             HarborCommandBuilder().build(
