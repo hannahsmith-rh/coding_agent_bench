@@ -79,13 +79,7 @@ class HarborCommandBuilder:
                 args += ["--ae", f"{key}={value}"]
 
         # Add environment
-        if environment == "openshift" and "openshift" not in EnvironmentType:
-            args += [
-                "--environment-import-path",
-                "coding_agent_bench.harbor_envs.openshift:OpenshiftEnvironment",
-            ]
-        else:
-            args += ["--env", environment]
+        args += ["--env", environment]
 
         # Add mounts
         if mounts is not None:
