@@ -3,7 +3,6 @@ from coding_agent_bench.intake.config import (
     ALLOWED_DATASETS,
     AUTO_APPROVE,
     DEFAULT_N_CONCURRENT,
-    DEFAULT_MODEL_MAX_LEN,
     Column,
     Status,
     generate_job_name,
@@ -33,7 +32,6 @@ def test_allowed_datasets_is_nonempty_set():
 
 def test_defaults():
     assert DEFAULT_N_CONCURRENT == 1
-    assert DEFAULT_MODEL_MAX_LEN == 262000
 
 
 def test_column_enum_has_all_columns():

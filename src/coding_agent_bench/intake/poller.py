@@ -2,12 +2,12 @@ import logging
 import os
 
 import httpx
+from dotenv import load_dotenv
 
 from coding_agent_bench.intake.config import (
     AUTO_APPROVE,
     Column,
     Status,
-    DEFAULT_MODEL_MAX_LEN,
     DEFAULT_N_CONCURRENT,
     generate_job_name,
 )
@@ -42,7 +42,6 @@ def _submit_job(
             "model_name": model_name,
             "server_url": server_url,
             "n_concurrent": DEFAULT_N_CONCURRENT,
-            "model_max_len": DEFAULT_MODEL_MAX_LEN,
         },
         headers={"X-API-Key": api_key},
         timeout=30,
@@ -191,6 +190,8 @@ def _handle_inflight_row(
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+    load_dotenv()
 
     credentials_path = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
     sheet_id = os.environ["GOOGLE_SHEET_ID"]

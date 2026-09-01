@@ -12,8 +12,12 @@ ALLOWED_DATASETS: set[str] = {
 }
 
 DEFAULT_N_CONCURRENT: int = 1
-DEFAULT_MODEL_MAX_LEN: int = 262000
 AUTO_APPROVE: bool = os.environ.get("AUTO_APPROVE", "false").lower() == "true"
+
+# Worksheet the poller reads. A scheduled Apps Script macro copies Form Responses
+# into this tab in Column order (see scripts/manual/intake_queue_sync.gs), so the
+# poller stays decoupled from the raw form's column ordering.
+QUEUE_TAB: str = "Queue"
 
 
 class Column(int, Enum):
