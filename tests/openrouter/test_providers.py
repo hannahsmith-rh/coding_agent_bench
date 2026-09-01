@@ -15,6 +15,12 @@ def test_is_openrouter_false():
     assert is_openrouter("https://vllm.example.com") is False
 
 
+def test_openrouter_base_url_excludes_v1():
+    # Agents append /v1 as needed; claude-code uses the base without it.
+    assert OPENROUTER_BASE_URL == "https://openrouter.ai/api"
+    assert not OPENROUTER_BASE_URL.endswith("/v1")
+
+
 def test_resolve_openrouter_returns_url_and_key(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
     base_url, api_key = resolve_provider("openrouter")

@@ -75,6 +75,23 @@ def test_oracle_rejects_openrouter():
         OracleAgentConfig().configure(model_name="m", server_url="openrouter")
 
 
-def test_claude_code_rejects_openrouter():
-    with pytest.raises(ValueError, match="OpenRouter"):
-        ClaudeCodeAgentConfig().configure(model_name="m", server_url="openrouter")
+def test_claude_code_openrouter(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    result = ClaudeCodeAgentConfig().configure(
+        model_name="anthropic/claude-opus-5", server_url="openrouter"
+    )
+    # OpenRouter's Claude Code integration: base URL without /v1, blank
+    # ANTHROPIC_API_KEY, key in ANTHROPIC_AUTH_TOKEN.
+    assert result.agent_env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
+    assert result.agent_env["ANTHROPIC_API_KEY"] == ""
+    assert result.agent_env["ANTHROPIC_AUTH_TOKEN"] == "sk-or-test"
+
+
+def test_claude_code_default_vllm(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    result = ClaudeCodeAgentConfig().configure(
+        model_name="m", server_url="http://vllm:8000"
+    )
+    assert result.agent_env["ANTHROPIC_BASE_URL"] == "http://vllm:8000"
+    assert result.agent_env["ANTHROPIC_API_KEY"] == "sk-no-key-required"
+    assert "ANTHROPIC_AUTH_TOKEN" not in result.agent_env

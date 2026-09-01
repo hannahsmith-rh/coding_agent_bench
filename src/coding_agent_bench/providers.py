@@ -1,15 +1,17 @@
 import os
 
 OPENROUTER_SENTINEL = "openrouter"
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+# Base URL without the /v1 suffix. Agents append /v1 as needed (openclaw,
+# opencode, pi, codex); claude-code uses the base as-is for ANTHROPIC_BASE_URL.
+OPENROUTER_BASE_URL = "https://openrouter.ai/api"
 OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY"
 
 # Agents (SupportedAgent.value strings) that cannot use OpenRouter. This is
 # only a fast, request-time 400 for create_job's lightweight openrouter
-# validation branch; the authoritative guards live in each agent's own
-# configure() (see OracleAgentConfig / ClaudeCodeAgentConfig), which still
-# raise ValueError at build/run time regardless of this constant.
-OPENROUTER_UNSUPPORTED_AGENTS = frozenset({"oracle", "claude-code"})
+# validation branch; the authoritative guard lives in the agent's own
+# configure() (see OracleAgentConfig), which still raises ValueError at
+# build/run time regardless of this constant.
+OPENROUTER_UNSUPPORTED_AGENTS = frozenset({"oracle"})
 
 
 def is_openrouter(server_url: str) -> bool:

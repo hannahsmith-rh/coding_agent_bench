@@ -31,19 +31,21 @@ class ClaudeCodeAgentConfig(AgentConfig):
     def configure(self, **kwargs) -> AgentConfigResult:
         model_name = kwargs["model_name"]
         server_url = kwargs["server_url"]
-        if is_openrouter(server_url):
-            raise ValueError(
-                "claude-code uses the Anthropic API format, which OpenRouter's "
-                "OpenAI-compatible endpoint does not provide"
-            )
+        base_url, api_key = resolve_provider(server_url)
         agent_env = {
-            "ANTHROPIC_BASE_URL": server_url,
-            "ANTHROPIC_API_KEY": "sk-no-key-required",
+            "ANTHROPIC_BASE_URL": base_url,
             "ANTHROPIC_MODEL": model_name,
             "ANTHROPIC_DEFAULT_OPUS_MODEL": model_name,
             "ANTHROPIC_DEFAULT_SONNET_MODEL": model_name,
             "ANTHROPIC_DEFAULT_HAIKU_MODEL": model_name,
         }
+        if api_key:
+            # OpenRouter's Claude Code integration expects a blank
+            # ANTHROPIC_API_KEY and the key in ANTHROPIC_AUTH_TOKEN.
+            agent_env["ANTHROPIC_API_KEY"] = ""
+            agent_env["ANTHROPIC_AUTH_TOKEN"] = api_key
+        else:
+            agent_env["ANTHROPIC_API_KEY"] = "sk-no-key-required"
         return AgentConfigResult(model=model_name, agent_env=agent_env)
 
 
