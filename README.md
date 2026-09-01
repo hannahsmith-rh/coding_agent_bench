@@ -196,6 +196,22 @@ sequenceDiagram
     ```sh
     oc apply -f deploy/job-queue-service.yml
     ```
+6. (Optional) To run jobs against OpenRouter (`server_url: openrouter`), create
+   an `openrouter-api-key` secret. Job pods mount it automatically (it is
+   optional, so non-OpenRouter jobs are unaffected):
+    ```yaml
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: openrouter-api-key
+    stringData:
+      OPENROUTER_API_KEY: <your-openrouter-api-key>
+    type: Opaque
+    ```
+    The queue service itself also needs `OPENROUTER_API_KEY` in its environment
+    to validate OpenRouter jobs at request time. Add it to `job-queue-secret`
+    (which the service already loads) or `envFrom` the `openrouter-api-key`
+    secret in `deploy/job-queue-service.yml`.
 
 Get the route for the deployed service:
 
