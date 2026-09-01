@@ -986,16 +986,16 @@ async def resume_job(job_id: str, req: ResumeJobRequest = ResumeJobRequest()):
                 detail=f"Unknown resource config '{nebius_gpu_config}'. Choose from: {', '.join(RESOURCE_CONFIG_REGISTRY)}",
             )
 
-    if is_openrouter(effective_server_url):
-        raise HTTPException(status_code=400, detail="Resuming an OpenRouter job is not supported")
-
     filter_flags = "".join(f" -f {shlex.quote(t)}" for t in req.filter_error_types)
     job_dir = f"/app/jobs/{shlex.quote(original_job_name)}"
     py_job_dir = f"/app/jobs/{original_job_name}"
 
-    # For nebius URLs, URL replacement is deferred to the worker (real URL not known yet)
+    # URL replacement only applies to real, changing hostnames (e.g. a new
+    # nebius instance IP). It is skipped for nebius placeholders (deferred to
+    # the worker) and for the openrouter sentinel, whose URL is static and
+    # already baked into the restored config.
     url_replace_step = ""
-    if req.server_url and nebius_gpu_config is None:
+    if req.server_url and nebius_gpu_config is None and not is_openrouter(req.server_url):
         url_replace_step = _build_url_replace_shell_step(req.server_url, py_job_dir)
 
     shell_command = (

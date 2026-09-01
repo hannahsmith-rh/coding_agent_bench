@@ -76,3 +76,22 @@ def test_create_job_openrouter_missing_key_returns_400(client, monkeypatch):
     )
     assert resp.status_code == 400, resp.text
     assert "OPENROUTER_API_KEY" in resp.text
+
+
+def test_resume_openrouter_job_is_allowed(client, monkeypatch):
+    # Resuming an OpenRouter job works: the restored config already carries the
+    # OpenRouter URL and key, so no URL rewrite is needed (same as a static
+    # vLLM-route resume).
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    from coding_agent_bench.api import JobStatus, job_store
+
+    job_id = "resume-openrouter-test"
+    job_store.insert(
+        job_id, "or-job", "codex", "some-dataset", "openai/gpt-4o",
+        "openrouter", ["sh", "-c", "echo hi"],
+    )
+    job_store.update_status(job_id, JobStatus.COMPLETED)
+
+    resp = client.post(f"/jobs/{job_id}/resume", headers=HEADERS)
+    assert resp.status_code == 200, resp.text
+    assert "not supported" not in resp.text.lower()
