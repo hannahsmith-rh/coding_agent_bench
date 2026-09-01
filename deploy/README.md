@@ -138,3 +138,44 @@ pools:
     gpu_model: A100
     vram_per_gpu: 80
 ```
+
+## Intake Poller
+
+The `intake-poller` CronJob (`deploy/intake-cronjob.yml`) reads benchmark
+requests from a Google Sheet, submits approved rows to the job queue, and emails
+submitters when a job is queued, completed, or failed. It runs every 6 hours.
+
+### Google Sheet
+
+The poller reads from a tab named `Queue` (not the raw `Form Responses 1` tab),
+laid out in the exact order of `coding_agent_bench.intake.config.Column`. A
+scheduled Apps Script macro (`scripts/manual/intake_queue_sync.gs`) copies new
+form responses into that tab, mapping columns by header name so the form's
+question order can change without breaking the poller. Install the macro via
+Extensions > Apps Script and add a form-submit or time-driven trigger for
+`syncFormResponsesToQueue`.
+
+### Secrets
+
+**`job-queue-secret`** — shared with the job-queue Deployment. The poller reads
+these keys from it:
+
+| Key | Description |
+|-----|-------------|
+| `API_KEY` | API key for the job-queue service |
+| `GOOGLE_SHEET_ID` | ID of the intake Google Sheet (the value between `/d/` and `/edit` in its URL) |
+| `SENDER_EMAIL` | Address notification emails are sent from (e.g. `ace-model-evals@redhat.com`) |
+| `AUTO_APPROVE` | `"true"` to auto-submit rows with a blank status, otherwise `"false"` |
+
+**`intake-poller-google-sa`** — the Google service-account key used for Sheets
+and Gmail access, mounted at `/etc/google/service-account.json`:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: intake-poller-google-sa
+type: Opaque
+stringData:
+  service-account.json: <sa-file-content>
+```

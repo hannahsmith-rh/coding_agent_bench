@@ -29,7 +29,10 @@ spec:
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: /etc/google/service-account.json
             - name: GOOGLE_SHEET_ID
-              value: "1WSIvdLtnyaDBkF6fjYWGpyG8gPZwKl7BeHuGrxvNCKE"
+              valueFrom:
+                secretKeyRef:
+                  name: job-queue-secret
+                  key: GOOGLE_SHEET_ID
             - name: JOB_QUEUE_URL
               value: http://job-queue-service
             - name: API_KEY
@@ -38,9 +41,15 @@ spec:
                   name: job-queue-secret
                   key: API_KEY
             - name: SENDER_EMAIL
-              value: ace-model-evals@redhat.com
+              valueFrom:
+                secretKeyRef:
+                  name: job-queue-secret
+                  key: SENDER_EMAIL
             - name: AUTO_APPROVE
-              value: "false"
+              valueFrom:
+                secretKeyRef:
+                  name: job-queue-secret
+                  key: AUTO_APPROVE
             securityContext:
               runAsNonRoot: true
               allowPrivilegeEscalation: false
