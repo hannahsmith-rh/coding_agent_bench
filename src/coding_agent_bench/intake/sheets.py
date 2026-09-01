@@ -1,7 +1,7 @@
 import gspread
 from google.oauth2.service_account import Credentials
 
-from coding_agent_bench.intake.config import Column
+from coding_agent_bench.intake.config import Column, QUEUE_TAB
 
 SCOPES = [
     "https://spreadsheets.google.com/feeds",
@@ -13,7 +13,7 @@ class SheetsClient:
     def __init__(self, credentials_path: str, sheet_id: str):
         creds = Credentials.from_service_account_file(credentials_path, scopes=SCOPES)
         gc = gspread.authorize(creds)
-        self._sheet = gc.open_by_key(sheet_id).sheet1
+        self._sheet = gc.open_by_key(sheet_id).worksheet(QUEUE_TAB)
 
     def get_all_rows(self) -> list[list[str]]:
         all_values = self._sheet.get_all_values()
