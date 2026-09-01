@@ -18,6 +18,9 @@ from coding_agent_bench.job import OpenshiftJob
 from coding_agent_bench.nebius_utils import NebiusInstanceManager, RESOURCE_CONFIG_REGISTRY
 from coding_agent_bench.models import ModelConfig, MODEL_REGISTRY
 from coding_agent_bench.providers import is_openrouter, resolve_provider, OPENROUTER_UNSUPPORTED_AGENTS
+from coding_agent_bench.agents import AGENT_REGISTRY
+from coding_agent_bench.ui import build_submit_form_html
+from coding_agent_bench import VERSION
 
 import getpass
 import json
@@ -239,9 +242,11 @@ class CreateJobRequest(BaseModel):
     dataset_pattern: Optional[str] = Field(None, description="Pattern to filter dataset tasks")
     n_concurrent: int = Field(1, description="Number of concurrent tasks")
     n_tasks: Optional[int] = Field(None, description="Total number of tasks to run")
-    model_max_len: int = Field(262000, description="Maximum model context length in tokens")
+    model_max_len: Optional[int] = Field(None, description="Maximum model context length in tokens")
     before_script: Optional[str] = Field(None, description="Script to run before harbor job execution")
     agent_version: Optional[str] = Field(None, description="Pin agent to a specific version (overrides default)")
+    max_retries: Optional[int] = Field(None, description="Max retry attempts per task (default: 1)")
+    retry_include: Optional[list[str]] = Field(None, description="Error types to retry (default: AgentTimeoutError, NonZeroAgentExitCodeError, ApiRateLimitError, ApiUsageLimitError)")
 
 
 class ResumeJobRequest(BaseModel):
@@ -421,6 +426,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(lifespan=lifespan)
 router = APIRouter(dependencies=[Depends(_verify_api_key)])
+
+# Public UI router (no API key required)
+ui_router = APIRouter()
 
 
 async def _run_oc(command: list[str], timeout_sec: int = 30) -> str:
@@ -698,20 +706,69 @@ async def ui():
             nebius_rows = f'<tr><td colspan="{len(nebius_cols)}">No instances</td></tr>'
         nebius_section = f"<h2>Nebius Instances</h2><table><tr>{nebius_header}</tr>{nebius_rows}</table>"
 
+    # Build API key input section
+    api_key_section = """
+<div id="api-key-section" style="margin-bottom: 1.5rem; padding: 0.75rem; border: 1px solid #ddd; border-radius: 8px; background: #fffbe6;">
+    <label for="api-key-input" style="font-weight: bold;">API Key:</label>
+    <input type="password" id="api-key-input" placeholder="Enter your API key"
+           style="margin-left: 0.5rem; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; width: 300px;">
+    <button type="button" onclick="saveApiKey()" style="margin-left: 0.5rem; padding: 0.5rem 1rem; background: #0066cc; color: white; border: none; border-radius: 4px; cursor: pointer;">Save</button>
+    <button type="button" onclick="clearApiKey()" style="margin-left: 0.25rem; padding: 0.5rem 1rem; background: #666; color: white; border: none; border-radius: 4px; cursor: pointer;">Clear</button>
+    <span id="api-key-status" style="margin-left: 1rem;"></span>
+</div>
+<script>
+function saveApiKey() {{
+    const key = document.getElementById('api-key-input').value.trim();
+    if (key) {{
+        localStorage.setItem('coding_agent_bench_api_key', key);
+        document.getElementById('api-key-status').textContent = 'API key saved.';
+        document.getElementById('api-key-status').style.color = 'green';
+    }}
+}}
+function clearApiKey() {{
+    localStorage.removeItem('coding_agent_bench_api_key');
+    document.getElementById('api-key-input').value = '';
+    document.getElementById('api-key-status').textContent = 'API key cleared.';
+    document.getElementById('api-key-status').style.color = '#cc6600';
+}}
+(function() {{
+    const savedKey = localStorage.getItem('coding_agent_bench_api_key');
+    if (savedKey) {{
+        document.getElementById('api-key-input').value = savedKey;
+    }}
+}})();
+</script>
+"""
+
+    # Build submit form with current data
+    nebius_enabled = os.environ.get("NEBIUS_ENABLED") == "1"
+    submit_form_html = build_submit_form_html(
+        models=list(MODEL_REGISTRY.keys()),
+        agents=list(AGENT_REGISTRY.keys()),
+        nebius_configs=list(RESOURCE_CONFIG_REGISTRY.keys()) if nebius_enabled else [],
+        nebius_enabled=nebius_enabled,
+    )
+
     html_page = f"""<!DOCTYPE html>
 <html>
 <head>
 <title>Job Queue</title>
-<meta http-equiv="refresh" content="5">
 <style>
 body {{ font-family: sans-serif; margin: 2rem; }}
 table {{ border-collapse: collapse; width: 100%; margin-bottom: 2rem; }}
 th, td {{ border: 1px solid #ccc; padding: 0.5rem; text-align: left; }}
 th {{ background: #f5f5f5; }}
+h1 {{ display: flex; align-items: center; gap: 0.75rem; }}
+h1 svg {{ flex-shrink: 0; }}
 </style>
 </head>
 <body>
-<h1>Job Queue</h1>
+<h1>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 145" width="32" height="32" aria-hidden="true"><style>.cls-1{{fill:#e00;}}</style><path d="M157.77,62.61a14,14,0,0,1,.31,3.42c0,14.88-18.1,17.46-30.61,17.46C78.83,83.49,42.53,53.26,42.53,44a6.43,6.43,0,0,1,.22-1.94l-3.66,9.06a18.45,18.45,0,0,0-1.51,7.33c0,18.11,41,45.48,87.74,45.48,20.69,0,36.43-7.76,36.43-21.77,0-1.08,0-1.94-1.73-10.13Z"/><path class="cls-1" d="M127.47,83.49c12.51,0,30.61-2.58,30.61-17.46a14,14,0,0,0-.31-3.42l-7.45-32.36c-1.72-7.12-3.23-10.35-15.73-16.6C124.89,8.69,103.76.5,97.51.5,91.69.5,90,8,83.06,8c-6.68,0-11.64-5.6-17.89-5.6-6,0-9.91,4.09-12.93,12.5,0,0-8.41,23.72-9.49,27.16A6.43,6.43,0,0,0,42.53,44c0,9.22,36.3,39.45,84.94,39.45M160,72.07c1.73,8.19,1.73,9.05,1.73,10.13,0,14-15.74,21.77-36.43,21.77C78.54,104,37.58,76.6,37.58,58.49a18.45,18.45,0,0,1,1.51-7.33C22.27,52,.5,55,.5,74.22c0,31.48,74.59,70.28,133.65,70.28,45.28,0,56.7-20.48,56.7-36.65,0-12.72-11-27.16-30.83-35.78"/></svg>
+  Job Queue <font size="4">v{VERSION}</font>
+</h1>
+{api_key_section}
+{submit_form_html}
 {nebius_section}
 {build_table("Running", running)}
 {build_table("Queued", queued)}
@@ -747,6 +804,11 @@ def build_cli_command(req: CreateJobRequest):
         command += ["--before-script", req.before_script]
     if req.agent_version:
         command += ["--agent-version", req.agent_version]
+    if req.max_retries is not None:
+        command += ["--max-retries", str(req.max_retries)]
+    if req.retry_include is not None:
+        for exc in req.retry_include:
+            command += ["--retry-include", exc]
 
     return command
 
@@ -966,4 +1028,24 @@ async def get_models():
     models = list(MODEL_REGISTRY.keys())
     return {"models": models}
 
+@ui_router.get("/api/models")
+async def get_models_public():
+    """List available models (public endpoint for UI)."""
+    return {"models": list(MODEL_REGISTRY.keys())}
+
+@ui_router.get("/api/agents")
+async def get_agents():
+    """List available agents (public endpoint for UI)."""
+    return {"agents": list(AGENT_REGISTRY.keys())}
+
+@ui_router.get("/api/nebius-configs")
+async def get_nebius_configs():
+    """List available nebius resource configs (public endpoint for UI)."""
+    nebius_enabled = os.environ.get("NEBIUS_ENABLED") == "1"
+    return {
+        "nebius_enabled": nebius_enabled,
+        "configs": list(RESOURCE_CONFIG_REGISTRY.keys()),
+    }
+
 app.include_router(router)
+app.include_router(ui_router)
