@@ -8,11 +8,10 @@ from googleapiclient.discovery import build
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 
 
-def _build_gmail_service(credentials_path: str, sender: str) -> Any:
+def _build_gmail_service(credentials_path: str) -> Any:
     creds = Credentials.from_service_account_file(
         credentials_path,
         scopes=GMAIL_SCOPES,
-        subject=sender,
     )
     return build("gmail", "v1", credentials=creds)
 
@@ -35,10 +34,10 @@ def send_queued_email(
     sender: str,
     gmail_credentials_path: str,
 ) -> None:
-    service = _build_gmail_service(gmail_credentials_path, sender)
-    subject = f"Benchmark request submitted: {agent} / {dataset}"
+    service = _build_gmail_service(gmail_credentials_path)
+    subject = f"Benchmark request queued: {agent} / {dataset}"
     body = (
-        f"Your benchmark request has been submitted.\n\n"
+        f"Your benchmark request has been queued.\n\n"
         f"Agent: {agent}\n"
         f"Dataset: {dataset}\n"
         f"Model: {model_name}\n"
@@ -53,9 +52,13 @@ def send_completed_email(
     sender: str,
     gmail_credentials_path: str,
 ) -> None:
-    service = _build_gmail_service(gmail_credentials_path, sender)
+    service = _build_gmail_service(gmail_credentials_path)
     subject = f"Benchmark job completed: {job_id}"
-    body = f"Your benchmark job {job_id} has completed.\n"
+    body = (
+        f"Your benchmark job {job_id} has completed.\n\n"
+        f"You can view the results on the Coding Agent Leaderboard:\n"
+        f"https://huggingface.co/spaces/taagarwa/coding-agent-leaderboard\n"
+    )
     _send_email(service, sender, to, subject, body)
 
 
@@ -66,7 +69,11 @@ def send_failed_email(
     sender: str,
     gmail_credentials_path: str,
 ) -> None:
-    service = _build_gmail_service(gmail_credentials_path, sender)
+    service = _build_gmail_service(gmail_credentials_path)
     subject = f"Benchmark job failed: {job_id}"
-    body = f"Your benchmark job {job_id} has failed.\n\nError: {error}\n"
+    body = (
+        f"Your benchmark job {job_id} has failed.\n\n"
+        f"Error: {error}\n\n"
+        f"Reply to this email and the team will look into it or help you resubmit.\n"
+    )
     _send_email(service, sender, to, subject, body)
