@@ -224,3 +224,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local gitleaks secret-scanning setup (kept local, not shared with the team)
+.gitleaks.toml
+.pre-commit-config.yaml
+
+# Superpowers design docs (kept local, not shared with the team)
+docs/superpowers/
+
+# Superpowers SDD scratch workspace
+.superpowers/

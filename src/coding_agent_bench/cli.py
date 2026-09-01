@@ -9,6 +9,7 @@ import typer
 
 from coding_agent_bench.builder import HarborCommandBuilder, SupportedAgent
 from coding_agent_bench.job import OpenshiftJob
+from coding_agent_bench.providers import is_openrouter
 from coding_agent_bench.manifest import deploy as deploy_model
 from coding_agent_bench.manifest import generate
 from coding_agent_bench.utils import cmd_to_string
@@ -85,7 +86,7 @@ def run(
         
         # Create the job
         try:
-            job.run(command, _before_script)
+            job.run(command, _before_script, openrouter=is_openrouter(server_url))
         except KeyboardInterrupt:
             typer.echo("\nInterrupted — cleaning up remote job...")
             job.cleanup()
