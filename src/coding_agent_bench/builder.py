@@ -46,6 +46,7 @@ class HarborCommandBuilder:
         agent_version: str = None,
         max_retries: int = None,
         retry_include: list[str] = None,
+        skills: list[str] = None,
         **kwargs,
     ) -> list[str]:
         args = []
@@ -85,6 +86,10 @@ class HarborCommandBuilder:
         if mounts is not None:
             args += ["--mounts-json", json.dumps(mounts)]
 
+        # Add agent skills using Harbor's repeatable native flag.
+        for skill in skills or []:
+            args += ["--skill", skill]
+
         # Add number of concurrent tasks
         args += ["--n-concurrent", str(n_concurrent)]
 
@@ -123,6 +128,7 @@ class HarborCommandBuilder:
         agent_version: str = None,
         max_retries: int = None,
         retry_include: list[str] = None,
+        skills: list[str] = None,
         **kwargs,
     ) -> tuple[list[str], Path]:
         """
@@ -157,6 +163,7 @@ class HarborCommandBuilder:
             agent_version=agent_version,
             max_retries=max_retries,
             retry_include=retry_include,
+            skills=skills,
         )
 
         job_path = self.jobs_dir / job_name

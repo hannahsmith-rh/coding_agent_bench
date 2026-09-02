@@ -17,6 +17,7 @@ from coding_agent_bench.builder import SupportedAgent, HarborCommandBuilder
 from coding_agent_bench.job import OpenshiftJob
 from coding_agent_bench.nebius_utils import NebiusInstanceManager, RESOURCE_CONFIG_REGISTRY
 from coding_agent_bench.models import ModelConfig, MODEL_REGISTRY
+from coding_agent_bench.utils import validate_remote_skill_sources
 from coding_agent_bench.providers import is_openrouter, resolve_provider, OPENROUTER_UNSUPPORTED_AGENTS
 from coding_agent_bench.agents import AGENT_REGISTRY
 from coding_agent_bench.ui import build_submit_form_html
@@ -247,6 +248,10 @@ class CreateJobRequest(BaseModel):
     agent_version: Optional[str] = Field(None, description="Pin agent to a specific version (overrides default)")
     max_retries: Optional[int] = Field(None, description="Max retry attempts per task (default: 1)")
     retry_include: Optional[list[str]] = Field(None, description="Error types to retry (default: AgentTimeoutError, NonZeroAgentExitCodeError, ApiRateLimitError, ApiUsageLimitError)")
+    skills: list[str] = Field(
+        default_factory=list,
+        description="Public Git skill sources in org/name[@ref] or HTTP(S) URL form",
+    )
 
 
 class ResumeJobRequest(BaseModel):
@@ -809,12 +814,19 @@ def build_cli_command(req: CreateJobRequest):
     if req.retry_include is not None:
         for exc in req.retry_include:
             command += ["--retry-include", exc]
+    for skill in req.skills:
+        command += ["--skill", skill]
 
     return command
 
 @router.post("/jobs", response_model=CreateJobResponse)
 async def create_job(req: CreateJobRequest):
     """Create a new benchmark job."""
+    try:
+        validate_remote_skill_sources(req.skills)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
     # Skip harbor command validation for nebius jobs (server_url is a placeholder)
     nebius_gpu_config = _parse_nebius_url(req.server_url)
     if nebius_gpu_config is not None:
@@ -850,6 +862,7 @@ async def create_job(req: CreateJobRequest):
                 n_tasks=req.n_tasks,
                 model_max_len=req.model_max_len,
                 job_name=req.job_name,
+                skills=req.skills,
             )
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
