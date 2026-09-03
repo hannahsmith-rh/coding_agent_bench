@@ -35,17 +35,17 @@ spec:
             - name: GOOGLE_SHEET_ID
               valueFrom:
                 secretKeyRef:
-                  name: job-queue-secret
+                  name: intake-poller-secret
                   key: GOOGLE_SHEET_ID
             - name: JOB_QUEUE_URL
               valueFrom:
                 secretKeyRef:
-                  name: job-queue-secret
+                  name: intake-poller-secret
                   key: JOB_QUEUE_URL
             - name: ALLOWED_SERVER_HOSTS
               valueFrom:
                 secretKeyRef:
-                  name: job-queue-secret
+                  name: intake-poller-secret
                   key: ALLOWED_SERVER_HOSTS
             - name: API_KEY
               valueFrom:
@@ -55,12 +55,12 @@ spec:
             - name: SENDER_EMAIL
               valueFrom:
                 secretKeyRef:
-                  name: job-queue-secret
+                  name: intake-poller-secret
                   key: SENDER_EMAIL
             - name: AUTO_APPROVE
               valueFrom:
                 secretKeyRef:
-                  name: job-queue-secret
+                  name: intake-poller-secret
                   key: AUTO_APPROVE
             securityContext:
               runAsNonRoot: true

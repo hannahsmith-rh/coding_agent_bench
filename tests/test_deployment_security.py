@@ -9,6 +9,7 @@ from coding_agent_bench.job import OpenshiftJob
 
 
 DEPLOYMENT_PATH = Path(__file__).parents[1] / "deploy" / "job-queue-service.yml"
+INTAKE_CRONJOB_PATH = Path(__file__).parents[1] / "deploy" / "intake-cronjob.yml"
 
 
 def _deployment_objects() -> dict[str, dict]:
@@ -16,6 +17,12 @@ def _deployment_objects() -> dict[str, dict]:
     with DEPLOYMENT_PATH.open() as manifest:
         objects = list(yaml.safe_load_all(manifest))
     return {obj["kind"]: obj for obj in objects}
+
+
+def _intake_cronjob() -> dict:
+    """Return the intake CronJob manifest."""
+    with INTAKE_CRONJOB_PATH.open() as manifest:
+        return yaml.safe_load(manifest)
 
 
 def test_queue_manifest_encrypts_service_and_route():
@@ -66,3 +73,22 @@ def test_managed_worker_endpoint_must_be_public():
     )
     assert errors
     assert "private" in errors[0] or "reserved" in errors[0]
+
+
+def test_intake_cronjob_uses_a_dedicated_poller_secret():
+    """Keep poller settings separate from the queue service secret."""
+    cronjob = _intake_cronjob()
+    container = cronjob["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]
+    env = {entry["name"]: entry for entry in container["env"]}
+
+    poller_only_keys = {
+        "GOOGLE_SHEET_ID",
+        "JOB_QUEUE_URL",
+        "ALLOWED_SERVER_HOSTS",
+        "SENDER_EMAIL",
+        "AUTO_APPROVE",
+    }
+    for key in poller_only_keys:
+        assert env[key]["valueFrom"]["secretKeyRef"]["name"] == "intake-poller-secret"
+
+    assert env["API_KEY"]["valueFrom"]["secretKeyRef"]["name"] == "job-queue-secret"
