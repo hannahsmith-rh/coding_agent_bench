@@ -195,7 +195,7 @@ sequenceDiagram
       JOB_QUEUE_URL: https://<queue-route-host>
       ALLOWED_SERVER_HOSTS: <comma-separated-model-server-hostnames>
       GOOGLE_SHEET_ID: <sheet-id>
-      SENDER_EMAIL: <notification-sender>
+      SENDER_EMAIL: ace-model-evals@redhat.com
       AUTO_APPROVE: 'false'
     type: Opaque
     ```
