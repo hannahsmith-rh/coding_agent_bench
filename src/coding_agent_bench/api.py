@@ -52,8 +52,8 @@ NEBIUS_PREFIX = "nebius-"
 
 def _parse_nebius_url(server_url: str) -> str | None:
     """Return the resource config name if server_url is a nebius placeholder, else None."""
-    if server_url.startswith(NEBIUS_PREFIX):
-        return server_url[len(NEBIUS_PREFIX):]
+    if server_url.lower().startswith(NEBIUS_PREFIX):
+        return server_url[len(NEBIUS_PREFIX):].lower()
     return None
 
 

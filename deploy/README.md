@@ -180,6 +180,11 @@ or link-local targets. Cluster operators should pair it with an egress policy
 for `app=harbor` worker pods that permits DNS, the queue/MinIO services, and the
 configured public model-server HTTPS destinations while excluding private CIDRs.
 
+For managed Nebius capacity, an approver can set `SERVER_URL` to an explicit
+resource token such as `nebius-h200` (or `nebius-b200x8`). The queue service
+validates that token, provisions the instance, and supplies its endpoint after
+approval; the requester never needs to know that endpoint.
+
 **`intake-poller-google-sa`** — the Google service-account key used for Sheets
 and Gmail access, mounted at `/etc/google/service-account.json`:
 

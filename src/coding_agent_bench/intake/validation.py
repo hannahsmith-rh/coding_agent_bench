@@ -7,6 +7,9 @@ import socket
 from urllib.parse import urlparse
 
 from coding_agent_bench.intake.config import ALLOWED_AGENTS, ALLOWED_DATASETS
+from coding_agent_bench.nebius_utils import RESOURCE_CONFIG_REGISTRY
+
+NEBIUS_PREFIX = "nebius-"
 
 
 def _configured_server_hosts(allowed_hosts: Collection[str] | None) -> set[str]:
@@ -113,6 +116,17 @@ def validate_server_url(
     return errors
 
 
+def _validate_nebius_resource(server_url: str) -> list[str] | None:
+    """Validate a managed-Nebius token without requiring a requester URL."""
+    if not server_url.lower().startswith(NEBIUS_PREFIX):
+        return None
+    resource = server_url[len(NEBIUS_PREFIX):].lower()
+    if resource not in RESOURCE_CONFIG_REGISTRY:
+        allowed = ", ".join(sorted(RESOURCE_CONFIG_REGISTRY))
+        return [f"Unknown Nebius resource '{resource}'. Allowed: {allowed}"]
+    return []
+
+
 def validate_row(
     agent: str,
     dataset: str,
@@ -133,6 +147,10 @@ def validate_row(
     if not server_url:
         errors.append("Server URL is empty")
     elif server_url.lower() != "openrouter":
-        errors.extend(validate_server_url(server_url, allowed_hosts=allowed_hosts))
+        nebius_errors = _validate_nebius_resource(server_url)
+        if nebius_errors is not None:
+            errors.extend(nebius_errors)
+        else:
+            errors.extend(validate_server_url(server_url, allowed_hosts=allowed_hosts))
 
     return errors

@@ -77,6 +77,27 @@ def test_openrouter_url_accepted():
     assert errors == []
 
 
+def test_managed_nebius_resource_is_accepted():
+    """Accept a managed-Nebius resource token instead of requiring its future URL."""
+    errors = validate_row(
+        agent="codex",
+        dataset="swe-bench/swe-bench-verified",
+        server_url="nebius-h200",
+    )
+    assert errors == []
+
+
+def test_unknown_nebius_resource_is_rejected():
+    """Reject managed-Nebius tokens that are not in the resource registry."""
+    errors = validate_row(
+        agent="codex",
+        dataset="swe-bench/swe-bench-verified",
+        server_url="nebius-unknown",
+    )
+    assert len(errors) == 1
+    assert "nebius" in errors[0].lower()
+
+
 def test_multiple_errors():
     """Report independent agent, dataset, and URL validation errors."""
     errors = validate_row(

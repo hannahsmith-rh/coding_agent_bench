@@ -82,3 +82,8 @@ def test_create_rejects_unapproved_server_host(isolated_queue):
         asyncio.run(api.create_job(request))
 
     assert exc_info.value.status_code == 400
+
+
+def test_nebius_resource_tokens_are_case_insensitive():
+    """Normalize managed-Nebius resource tokens before looking them up."""
+    assert api._parse_nebius_url("nebius-H200") == "h200"
