@@ -204,8 +204,10 @@ resource token such as `nebius-h200` (or `nebius-b200x8`). The queue service
 validates that token, provisions the instance, and supplies its endpoint after
 approval; the requester never needs to know that endpoint.
 
-**`intake-poller-google-sa`** — the Google service-account key used for Sheets
-and Gmail access, mounted at `/etc/google/service-account.json`:
+**`intake-poller-google-sa`** — Google credentials mounted at `/etc/google`.
+The service-account key is used for Sheets, while the authorized-user OAuth
+token is used for Gmail notifications. A service account cannot send through
+Gmail as `ace-model-evals@redhat.com` without domain-wide delegation.
 
 ```yaml
 apiVersion: v1
@@ -215,7 +217,14 @@ metadata:
 type: Opaque
 stringData:
   service-account.json: <sa-file-content>
+  gmail-credentials.json: <authorized-user-oauth-token-json>
 ```
+
+Set `gmail-credentials.json` to an authorized-user token for the mailbox that
+will send notifications, with the `gmail.send` scope. The `From` address must
+be that mailbox or a Gmail-approved send-as alias. The CronJob uses
+`GMAIL_CREDENTIALS_PATH` to select this file, so the Sheets service account and
+Gmail mailbox credentials remain separate.
 
 Each submitted Queue row carries a deterministic idempotency key. If the
 CronJob is retried after a network timeout, the queue API returns the original

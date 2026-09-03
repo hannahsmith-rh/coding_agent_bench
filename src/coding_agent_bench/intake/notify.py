@@ -1,19 +1,39 @@
 import base64
+import json
 from email.mime.text import MIMEText
 from typing import Any
 
-from google.oauth2.service_account import Credentials
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 
 
 def _build_gmail_service(credentials_path: str) -> Any:
-    """Build an authenticated Gmail API client from a service-account file."""
-    creds = Credentials.from_service_account_file(
-        credentials_path,
-        scopes=GMAIL_SCOPES,
-    )
+    """Build a Gmail client from a mailbox OAuth credential file.
+
+    The Sheets client uses a service account, but a service account is not a
+    Gmail mailbox. Without domain-wide delegation it cannot send through
+    ``users.messages.send(userId='me')``. Gmail notifications therefore use an
+    authorized-user credential containing a refresh token for the sender's
+    mailbox (or an allowed From alias).
+    """
+    with open(credentials_path, encoding="utf-8") as credential_file:
+        credential_info = json.load(credential_file)
+    if credential_info.get("type") == "service_account":
+        raise ValueError(
+            "Gmail notifications require mailbox OAuth credentials; a service-account "
+            "credential cannot send as a mailbox without domain-wide delegation"
+        )
+    try:
+        creds = Credentials.from_authorized_user_file(
+            credentials_path,
+            scopes=GMAIL_SCOPES,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Gmail credentials must be an authorized-user OAuth token file"
+        ) from exc
     return build("gmail", "v1", credentials=creds)
 
 

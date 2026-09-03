@@ -262,6 +262,7 @@ if __name__ == "__main__":
     load_dotenv()
 
     credentials_path = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
+    gmail_credentials_path = os.environ.get("GMAIL_CREDENTIALS_PATH", credentials_path)
     sheet_id = os.environ["GOOGLE_SHEET_ID"]
     api_base_url = os.environ["JOB_QUEUE_URL"]
     _validate_queue_url(api_base_url)
@@ -269,5 +270,5 @@ if __name__ == "__main__":
     sender_email = os.environ["SENDER_EMAIL"]
 
     client = SheetsClient(credentials_path, sheet_id)
-    process_rows(client, api_base_url, api_key, sender_email, credentials_path)
+    process_rows(client, api_base_url, api_key, sender_email, gmail_credentials_path)
     logger.info("Poller run complete")

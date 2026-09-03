@@ -57,6 +57,14 @@ spec:
           limits:
             cpu: "1"
             memory: "1Gi"
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
         env:
         - name: JOB_STORE_PATH
           value: /app/data/jobs.db

@@ -1,11 +1,43 @@
 import base64
+import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from coding_agent_bench.intake.notify import (
+    GMAIL_SCOPES,
+    _build_gmail_service,
     send_queued_email,
     send_completed_email,
     send_failed_email,
 )
+
+
+@patch("coding_agent_bench.intake.notify.build")
+@patch("coding_agent_bench.intake.notify.Credentials.from_authorized_user_file")
+def test_build_gmail_service_uses_mailbox_oauth_credentials(
+    mock_from_file, mock_build, tmp_path
+):
+    """Use an authorized-user token instead of the Sheets service account."""
+    credentials_path = tmp_path / "gmail-credentials.json"
+    credentials_path.write_text(json.dumps({"type": "authorized_user"}))
+    mock_creds = MagicMock()
+    mock_from_file.return_value = mock_creds
+
+    result = _build_gmail_service(str(credentials_path))
+
+    assert result is mock_build.return_value
+    mock_from_file.assert_called_once_with(str(credentials_path), scopes=GMAIL_SCOPES)
+    mock_build.assert_called_once_with("gmail", "v1", credentials=mock_creds)
+
+
+def test_build_gmail_service_rejects_service_account(tmp_path):
+    """Fail clearly instead of pretending a service account owns a mailbox."""
+    credentials_path = tmp_path / "service-account.json"
+    credentials_path.write_text(json.dumps({"type": "service_account"}))
+
+    with pytest.raises(ValueError, match="mailbox OAuth credentials"):
+        _build_gmail_service(str(credentials_path))
 
 
 def _extract_email_body(mock_service: MagicMock) -> str:

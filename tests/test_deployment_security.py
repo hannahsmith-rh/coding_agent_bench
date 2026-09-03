@@ -37,6 +37,12 @@ def test_queue_manifest_encrypts_service_and_route():
     assert service["spec"]["ports"][0]["targetPort"] == 8443
     assert route["spec"]["tls"]["termination"] == "reencrypt"
 
+    container_security = container["securityContext"]
+    assert container_security["runAsNonRoot"] is True
+    assert container_security["allowPrivilegeEscalation"] is False
+    assert container_security["capabilities"]["drop"] == ["ALL"]
+    assert container_security["seccompProfile"]["type"] == "RuntimeDefault"
+
 
 def test_task_egress_policy_does_not_select_orchestrator_pods():
     """Keep OpenShift API access on the queue's orchestrator pod."""

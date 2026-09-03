@@ -28,6 +28,8 @@ spec:
             env:
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: /etc/google/service-account.json
+            - name: GMAIL_CREDENTIALS_PATH
+              value: /etc/google/gmail-credentials.json
             - name: GOOGLE_SHEET_ID
               valueFrom:
                 secretKeyRef:
