@@ -9,6 +9,7 @@ GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 
 
 def _build_gmail_service(credentials_path: str) -> Any:
+    """Build an authenticated Gmail API client from a service-account file."""
     creds = Credentials.from_service_account_file(
         credentials_path,
         scopes=GMAIL_SCOPES,
@@ -17,6 +18,7 @@ def _build_gmail_service(credentials_path: str) -> Any:
 
 
 def _send_email(service, sender: str, to: str, subject: str, body_text: str) -> None:
+    """Encode and send a plain-text message through Gmail."""
     message = MIMEText(body_text)
     message["to"] = to
     message["from"] = sender
@@ -34,6 +36,7 @@ def send_queued_email(
     sender: str,
     gmail_credentials_path: str,
 ) -> None:
+    """Notify a requester that their benchmark has entered the queue."""
     service = _build_gmail_service(gmail_credentials_path)
     subject = f"Benchmark request queued: {agent} / {dataset}"
     body = (
@@ -52,6 +55,7 @@ def send_completed_email(
     sender: str,
     gmail_credentials_path: str,
 ) -> None:
+    """Notify a requester that their benchmark completed and link to results."""
     service = _build_gmail_service(gmail_credentials_path)
     subject = f"Benchmark job completed: {job_id}"
     body = (
@@ -69,6 +73,7 @@ def send_failed_email(
     sender: str,
     gmail_credentials_path: str,
 ) -> None:
+    """Notify a requester that their benchmark failed and explain how to get help."""
     service = _build_gmail_service(gmail_credentials_path)
     subject = f"Benchmark job failed: {job_id}"
     body = (

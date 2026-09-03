@@ -11,7 +11,6 @@ ALLOWED_DATASETS: set[str] = {
     "scale-ai/swe-bench-pro",
 }
 
-DEFAULT_N_CONCURRENT: int = 1
 AUTO_APPROVE: bool = os.environ.get("AUTO_APPROVE", "false").lower() == "true"
 
 # Worksheet the poller reads. A scheduled Apps Script macro copies Form Responses
@@ -44,5 +43,6 @@ class Status(str, Enum):
 
 
 def generate_job_name(agent: str, dataset: str, model_name: str) -> str:
+    """Build a readable, deterministic job name from the intake fields."""
     short_name = model_name.rsplit("/", 1)[-1]
     return f"{agent}_{dataset}_{short_name}"

@@ -182,7 +182,8 @@ sequenceDiagram
     oc apply -f deploy/harbor-orchestrator-sa.yml
     oc apply -f deploy/harbor-task-sa.yml
     ```
-4. Create a secret file named `job-queue-secret` with an `API_KEY` and apply it:
+4. Create a secret file named `job-queue-secret` with an `API_KEY` and the
+   intake settings (when the intake CronJob is deployed), then apply it:
     ```yaml
     apiVersion: v1
     kind: Secret
@@ -190,6 +191,12 @@ sequenceDiagram
       name:  job-queue-secret
     stringData:
       API_KEY: <your-api-key>
+      # Required by deploy/intake-cronjob.yml:
+      JOB_QUEUE_URL: https://<queue-route-host>
+      ALLOWED_SERVER_HOSTS: <comma-separated-model-server-hostnames>
+      GOOGLE_SHEET_ID: <sheet-id>
+      SENDER_EMAIL: <notification-sender>
+      AUTO_APPROVE: 'false'
     type: Opaque
     ```
 5. Create the queue service:
@@ -202,6 +209,10 @@ Get the route for the deployed service:
 ```sh
 oc get route job-queue-route --output jsonpath='{.spec.host}'
 ```
+
+Set `JOB_QUEUE_URL` in `job-queue-secret` to this HTTPS route (and set
+`ALLOWED_SERVER_HOSTS` to the approved model-server hosts) before applying
+`deploy/intake-cronjob.yml`.
 
 Check that the application is live by visiting the docs:
 

@@ -34,7 +34,15 @@ spec:
                   name: job-queue-secret
                   key: GOOGLE_SHEET_ID
             - name: JOB_QUEUE_URL
-              value: http://job-queue-service
+              valueFrom:
+                secretKeyRef:
+                  name: job-queue-secret
+                  key: JOB_QUEUE_URL
+            - name: ALLOWED_SERVER_HOSTS
+              valueFrom:
+                secretKeyRef:
+                  name: job-queue-secret
+                  key: ALLOWED_SERVER_HOSTS
             - name: API_KEY
               valueFrom:
                 secretKeyRef:

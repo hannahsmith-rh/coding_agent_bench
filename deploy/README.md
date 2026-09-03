@@ -164,8 +164,21 @@ these keys from it:
 |-----|-------------|
 | `API_KEY` | API key for the job-queue service |
 | `GOOGLE_SHEET_ID` | ID of the intake Google Sheet (the value between `/d/` and `/edit` in its URL) |
+| `JOB_QUEUE_URL` | HTTPS URL for the queue API. Use the cluster's TLS/mTLS endpoint; the poller fails closed instead of using plaintext HTTP. |
+| `ALLOWED_SERVER_HOSTS` | Comma-separated exact hostnames that model-server URLs may use. The poller resolves each hostname and rejects private, loopback, link-local, and reserved addresses. |
 | `SENDER_EMAIL` | Address notification emails are sent from (e.g. `ace-model-evals@redhat.com`) |
 | `AUTO_APPROVE` | `"true"` to auto-submit rows with a blank status, otherwise `"false"` |
+
+The intake payload intentionally leaves concurrency and model context length
+unset. The queue service applies its configured defaults and model-specific
+`ModelConfig` values. Do not add plaintext `http://` endpoints to the
+CronJob secret; `ALLOW_INSECURE_QUEUE_HTTP=true` is supported only for local
+development.
+
+The URL check runs before a job is queued and again covers DNS-resolved private
+or link-local targets. Cluster operators should pair it with an egress policy
+for `app=harbor` worker pods that permits DNS, the queue/MinIO services, and the
+configured public model-server HTTPS destinations while excluding private CIDRs.
 
 **`intake-poller-google-sa`** — the Google service-account key used for Sheets
 and Gmail access, mounted at `/etc/google/service-account.json`:
@@ -179,3 +192,7 @@ type: Opaque
 stringData:
   service-account.json: <sa-file-content>
 ```
+
+Each submitted Queue row carries a deterministic idempotency key. If the
+CronJob is retried after a network timeout, the queue API returns the original
+job instead of creating a duplicate.

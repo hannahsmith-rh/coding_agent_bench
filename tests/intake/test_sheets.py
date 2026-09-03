@@ -5,6 +5,7 @@ from coding_agent_bench.intake.sheets import SheetsClient
 
 
 def test_get_all_rows_pads_short_rows():
+    """Pad legacy rows so every poller column is addressable."""
     mock_sheet = MagicMock()
     mock_sheet.get_all_values.return_value = [
         ["Timestamp", "Agent", "Dataset", "Model", "URL", "Email",
@@ -25,6 +26,7 @@ def test_get_all_rows_pads_short_rows():
 
 
 def test_update_cell_calls_gspread():
+    """Translate data-row and zero-based column indexes for gspread."""
     mock_sheet = MagicMock()
 
     client = SheetsClient.__new__(SheetsClient)
