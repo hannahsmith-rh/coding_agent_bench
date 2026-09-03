@@ -42,11 +42,6 @@ spec:
                 secretKeyRef:
                   name: intake-poller-secret
                   key: JOB_QUEUE_URL
-            - name: ALLOWED_SERVER_HOSTS
-              valueFrom:
-                secretKeyRef:
-                  name: intake-poller-secret
-                  key: ALLOWED_SERVER_HOSTS
             - name: API_KEY
               valueFrom:
                 secretKeyRef:

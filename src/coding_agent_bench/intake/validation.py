@@ -1,8 +1,6 @@
 """Validation helpers for intake requests and model server URLs."""
 
-from collections.abc import Collection
 import ipaddress
-import os
 import socket
 from urllib.parse import urlparse
 
@@ -10,16 +8,6 @@ from coding_agent_bench.intake.config import ALLOWED_AGENTS, ALLOWED_DATASETS
 from coding_agent_bench.nebius_utils import RESOURCE_CONFIG_REGISTRY
 
 NEBIUS_PREFIX = "nebius-"
-
-
-def _configured_server_hosts(allowed_hosts: Collection[str] | None) -> set[str]:
-    """Return normalized model-server hostnames from an argument or environment."""
-    if allowed_hosts is None:
-        raw_hosts = os.environ.get("ALLOWED_SERVER_HOSTS", "")
-        allowed_hosts = raw_hosts.split(",")
-    elif isinstance(allowed_hosts, str):
-        allowed_hosts = allowed_hosts.split(",")
-    return {host.strip().lower().rstrip(".") for host in allowed_hosts if host.strip()}
 
 
 def _resolve_server_host(host: str, port: int | None) -> set[str]:
@@ -61,10 +49,9 @@ def _is_ip_literal(host: str) -> bool:
 
 def validate_server_url(
     server_url: str,
-    allowed_hosts: Collection[str] | None = None,
     require_https: bool = True,
 ) -> list[str]:
-    """Validate a model URL against the configured public-host allowlist.
+    """Validate a model URL without requiring a configured hostname allowlist.
 
     Hostnames are resolved during validation so private, loopback, link-local, and
     reserved addresses cannot be submitted as model endpoints. Callers should
@@ -95,13 +82,6 @@ def validate_server_url(
         return errors
 
     host = parsed.hostname.rstrip(".").lower()
-    configured_hosts = _configured_server_hosts(allowed_hosts)
-    if not configured_hosts:
-        errors.append("Server hostname is not configured; set ALLOWED_SERVER_HOSTS")
-        return errors
-    if host not in configured_hosts:
-        errors.append(f"Server hostname '{host}' is not in ALLOWED_SERVER_HOSTS")
-        return errors
 
     try:
         addresses = {host} if _is_ip_literal(host) else _resolve_server_host(host, port)
@@ -136,7 +116,6 @@ def validate_row(
     agent: str,
     dataset: str,
     server_url: str,
-    allowed_hosts: Collection[str] | None = None,
 ) -> list[str]:
     """Return human-readable validation errors for one intake spreadsheet row."""
     errors: list[str] = []
@@ -156,6 +135,6 @@ def validate_row(
         if nebius_errors is not None:
             errors.extend(nebius_errors)
         else:
-            errors.extend(validate_server_url(server_url, allowed_hosts=allowed_hosts))
+            errors.extend(validate_server_url(server_url))
 
     return errors

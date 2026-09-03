@@ -80,11 +80,7 @@ def _worker_server_url_errors(
         parsed = urlparse(server_url)
         if parsed.hostname is None:
             return ["Managed model endpoint has no hostname"]
-        return validate_server_url(
-            server_url,
-            allowed_hosts={parsed.hostname},
-            require_https=False,
-        )
+        return validate_server_url(server_url, require_https=False)
     return validate_server_url(server_url)
 
 

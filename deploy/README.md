@@ -177,7 +177,6 @@ development.
 |-----|-------------|
 | `GOOGLE_SHEET_ID` | ID of the intake Google Sheet (the value between `/d/` and `/edit` in its URL) |
 | `JOB_QUEUE_URL` | HTTPS URL for the queue API. Use the cluster's TLS/mTLS endpoint; the poller fails closed instead of using plaintext HTTP. |
-| `ALLOWED_SERVER_HOSTS` | Comma-separated exact hostnames that model-server URLs may use. The poller resolves each hostname and rejects private, loopback, link-local, and reserved addresses. |
 | `SENDER_EMAIL` | Address notification emails are sent from. Set it to `ace-model-evals@redhat.com`. |
 | `AUTO_APPROVE` | `"true"` to auto-submit rows with a blank status, otherwise `"false"` |
 

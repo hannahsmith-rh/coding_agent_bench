@@ -4,7 +4,7 @@ from coding_agent_bench.intake.validation import validate_row, validate_server_u
 
 
 def test_valid_row_returns_no_errors():
-    """Accept a configured public HTTPS model endpoint."""
+    """Accept a public HTTPS model endpoint."""
     errors = validate_row(
         agent="codex",
         dataset="swe-bench/swe-bench-verified",
@@ -108,26 +108,19 @@ def test_multiple_errors():
     assert len(errors) == 3
 
 
-def test_server_host_must_be_allowlisted():
-    """Reject a public-looking hostname that is not explicitly configured."""
-    errors = validate_server_url(
-        "https://other.example.com",
-        allowed_hosts={"vllm.example.com"},
-    )
-    assert any("allow" in error.lower() for error in errors)
+def test_server_host_does_not_require_allowlist():
+    """Accept a public model host without operator-managed configuration."""
+    assert validate_server_url("https://other.example.com") == []
 
 
 def test_literal_private_address_is_rejected():
-    """Reject loopback addresses even when someone adds them to the allowlist."""
-    errors = validate_server_url(
-        "https://127.0.0.1:8443",
-        allowed_hosts={"127.0.0.1"},
-    )
+    """Reject loopback addresses even without a hostname allowlist."""
+    errors = validate_server_url("https://127.0.0.1:8443")
     assert any("private" in error.lower() or "reserved" in error.lower() for error in errors)
 
 
 def test_dns_private_address_is_rejected(monkeypatch):
-    """Reject an allowlisted hostname that resolves to a private address."""
+    """Reject a hostname that resolves to a private address."""
     monkeypatch.setattr(
         socket,
         "getaddrinfo",
@@ -135,8 +128,5 @@ def test_dns_private_address_is_rejected(monkeypatch):
             (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", 443))
         ],
     )
-    errors = validate_server_url(
-        "https://vllm.example.com",
-        allowed_hosts={"vllm.example.com"},
-    )
+    errors = validate_server_url("https://vllm.example.com")
     assert any("private" in error.lower() for error in errors)

@@ -71,7 +71,6 @@ def test_intake_cronjob_uses_a_dedicated_poller_secret():
     poller_only_keys = {
         "GOOGLE_SHEET_ID",
         "JOB_QUEUE_URL",
-        "ALLOWED_SERVER_HOSTS",
         "SENDER_EMAIL",
         "AUTO_APPROVE",
     }

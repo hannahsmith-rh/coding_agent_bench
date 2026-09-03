@@ -1,6 +1,7 @@
 """Tests for queue request defaults and idempotent job creation."""
 
 import asyncio
+import socket
 import sqlite3
 
 import pytest
@@ -15,7 +16,6 @@ def isolated_queue(tmp_path, monkeypatch):
     previous_queue = list(api._job_queue)
     api.job_store = api.JobStore(tmp_path / "jobs.db")
     api._job_queue.clear()
-    monkeypatch.setenv("ALLOWED_SERVER_HOSTS", "vllm.example.com")
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
     try:
         yield
@@ -74,15 +74,21 @@ def test_omitted_queue_defaults_are_not_sent_to_harbor(isolated_queue):
     assert command[max_len_index + 1] == "131072"
 
 
-def test_create_rejects_unapproved_server_host(isolated_queue):
-    """Apply the model-server allowlist to direct queue API requests as well."""
+def test_create_accepts_an_unconfigured_server_host(isolated_queue, monkeypatch):
+    """Allow public model hosts without restarting for configuration changes."""
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
+        ],
+    )
     request = _request(key="unapproved-host")
-    request.server_url = "https://evil.example.com"
+    request.server_url = "https://new-model.example.com"
 
-    with pytest.raises(api.HTTPException) as exc_info:
-        asyncio.run(api.create_job(request))
+    result = asyncio.run(api.create_job(request))
 
-    assert exc_info.value.status_code == 400
+    assert result.job_id
 
 
 def test_nebius_resource_tokens_are_case_insensitive():
