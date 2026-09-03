@@ -57,6 +57,32 @@ def _parse_nebius_url(server_url: str) -> str | None:
     return None
 
 
+def _worker_server_url_errors(
+    server_url: str,
+    managed_endpoint: bool = False,
+) -> list[str]:
+    """Revalidate a model endpoint immediately before creating its worker pod.
+
+    Intake validation protects the queue boundary, while this second check closes
+    the DNS-rebinding window between approval and execution. Managed Nebius
+    instances are returned as public HTTP endpoints by the provider, so their
+    generated IP endpoint is checked for public reachability without applying the
+    normal HTTPS-only requirement.
+    """
+    if not server_url or server_url.lower() == "openrouter":
+        return []
+    if managed_endpoint:
+        parsed = urlparse(server_url)
+        if parsed.hostname is None:
+            return ["Managed model endpoint has no hostname"]
+        return validate_server_url(
+            server_url,
+            allowed_hosts={parsed.hostname},
+            require_https=False,
+        )
+    return validate_server_url(server_url)
+
+
 db_path = Path(os.environ.get("JOB_STORE_PATH", "jobs.db"))
 
 class JobStatus(str, Enum):
@@ -531,9 +557,27 @@ async def _best_effort_cleanup(oj: OpenshiftJob, signal: bool = False) -> str | 
     return "; ".join(errors) if errors else None
 
 
-async def _run_job(job_id: str, command: list[str]):
-    """Run and monitor an Openshift Job."""
+async def _run_job(
+    job_id: str,
+    command: list[str],
+    server_url: str | None = None,
+    managed_endpoint: bool = False,
+):
+    """Validate, run, and monitor an OpenShift Job."""
     global _active_job
+
+    if server_url:
+        server_url_errors = _worker_server_url_errors(
+            server_url,
+            managed_endpoint=managed_endpoint,
+        )
+        if server_url_errors:
+            job_store.update_status(
+                job_id,
+                JobStatus.FAILED,
+                error="Server URL validation failed: " + "; ".join(server_url_errors),
+            )
+            return
 
     oj = OpenshiftJob(job_name=job_id)
     task = asyncio.current_task()
@@ -663,10 +707,21 @@ async def _worker():
             model_config: ModelConfig | None = None
             nebius_instance_name: str | None = None
             nebius_gpu_config = _parse_nebius_url(server_url)
+            job_server_url = server_url
+            managed_endpoint = False
+            if nebius_gpu_config is not None and not _nebius:
+                job_store.update_status(
+                    job_id,
+                    JobStatus.FAILED,
+                    error="Nebius is not enabled on this server",
+                )
+                continue
             if nebius_gpu_config is not None and _nebius:
                 try:
                     nebius_instance_name, real_url = await _nebius.acquire_instance(model_name, gpu_config=nebius_gpu_config)
                     command = [real_url if arg == server_url else arg for arg in command]
+                    job_server_url = real_url
+                    managed_endpoint = True
                     model_config = MODEL_REGISTRY.get(model_name)
                     await _nebius.mark_job_started(nebius_instance_name)
                 except Exception as e:
@@ -678,7 +733,12 @@ async def _worker():
             if "--model-max-len" not in command and model_config is not None:
                 command += ["--model-max-len", str(model_config.model_max_len)]
 
-            await _run_job(job_id, command)
+            await _run_job(
+                job_id,
+                command,
+                server_url=job_server_url,
+                managed_endpoint=managed_endpoint,
+            )
 
             if nebius_instance_name and _nebius:
                 await _nebius.mark_job_completed(nebius_instance_name)

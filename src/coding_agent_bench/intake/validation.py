@@ -62,19 +62,24 @@ def _is_ip_literal(host: str) -> bool:
 def validate_server_url(
     server_url: str,
     allowed_hosts: Collection[str] | None = None,
+    require_https: bool = True,
 ) -> list[str]:
-    """Validate an HTTPS model URL against the configured public-host allowlist.
+    """Validate a model URL against the configured public-host allowlist.
 
     Hostnames are resolved during validation so private, loopback, link-local, and
     reserved addresses cannot be submitted as model endpoints. Cluster operators
     should also apply equivalent egress restrictions to worker pods because DNS can
-    change after this check.
+    change after this check. Managed endpoints may opt out of the HTTPS-only check
+    when the provider returns a public HTTP endpoint; ordinary intake URLs remain
+    HTTPS-only.
     """
     errors: list[str] = []
     parsed = urlparse(server_url)
 
-    if parsed.scheme != "https":
-        errors.append(f"Server URL must use https scheme, got '{parsed.scheme or 'none'}'")
+    allowed_schemes = {"https"} if require_https else {"http", "https"}
+    if parsed.scheme not in allowed_schemes:
+        expected = "https" if require_https else "http(s)"
+        errors.append(f"Server URL must use {expected} scheme, got '{parsed.scheme or 'none'}'")
         return errors
     if not parsed.netloc or parsed.hostname is None:
         errors.append("Server URL is not a valid URL")

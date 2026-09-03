@@ -254,6 +254,7 @@ class OpenshiftEnvironment(BaseEnvironment):
                 "name": self._pod_name,
                 "labels": {
                     "app": "harbor",
+                    "component": "task",
                     "harbor-session": self._pod_name,
                 },
             },

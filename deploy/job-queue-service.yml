@@ -46,7 +46,9 @@ spec:
             [ -f /app/data/nebius-ssh-key ] || ssh-keygen -t ed25519 -f /app/data/nebius-ssh-key -N "" -q && \
             NEBIUS_SSH_PUBLIC_KEY_PATH=/app/data/nebius-ssh-key.pub \
             NEBIUS_SSH_PRIVATE_KEY_PATH=/app/data/nebius-ssh-key \
-            uv run uvicorn coding_agent_bench.api:app --host 0.0.0.0 --port 8000
+            uv run uvicorn coding_agent_bench.api:app --host 0.0.0.0 --port 8443 \
+              --ssl-certfile /etc/job-queue/tls/tls.crt \
+              --ssl-keyfile /etc/job-queue/tls/tls.key
         resources:
           requests:
             cpu: "1"
@@ -61,16 +63,23 @@ spec:
         - secretRef:
             name: job-queue-secret
         ports:
-        - containerPort: 8000
-          name: http
+        - containerPort: 8443
+          name: https
         imagePullPolicy: Always
         volumeMounts:
         - mountPath: /app/data
           name: data
+        - mountPath: /etc/job-queue/tls
+          name: tls
+          readOnly: true
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: job-queue-pvc
+        - name: tls
+          secret:
+            secretName: job-queue-tls
+            defaultMode: 0440
       restartPolicy: Always
 --- 
 kind: Service
@@ -80,15 +89,17 @@ metadata:
   labels:
     app: job-queue
     component: api
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: job-queue-tls
 spec:
   selector:
     app: job-queue
     component: api
   type: ClusterIP
   ports:
-  - name: http
-    port: 80
-    targetPort: 8000
+  - name: https
+    port: 443
+    targetPort: 8443
     protocol: TCP
 ---
 apiVersion: route.openshift.io/v1
@@ -100,12 +111,88 @@ metadata:
     component: api
 spec:
   tls:
-    termination: edge
+    termination: reencrypt
     insecureEdgeTerminationPolicy: Redirect
   port:
-    targetPort: 8000
+    targetPort: https
   to:
     kind: Service
     name: job-queue-service
     weight: 100
   wildcardPolicy: None
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: harbor-task-egress
+  labels:
+    app: harbor
+    component: task
+spec:
+  # Only generated Harbor task pods are selected. The orchestrator pods keep
+  # their OpenShift API access and are intentionally labeled separately.
+  podSelector:
+    matchLabels:
+      app: harbor
+      component: task
+  policyTypes:
+  - Egress
+  egress:
+  # DNS is required before the model-server allowlist can be resolved.
+  - ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Result uploads use the in-cluster MinIO service.
+  - to:
+    - podSelector:
+        matchLabels:
+          app: harbor-minio
+          component: minio
+    ports:
+    - protocol: TCP
+      port: 9000
+  # The intake/API checks allowlisted hostnames and reject private addresses;
+  # this policy is the worker-side backstop against DNS rebinding/SSRF. Port
+  # 8000 is retained for managed Nebius instances, which expose vLLM directly
+  # on a public address; ordinary model URLs use HTTPS on 443.
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 100.64.0.0/10
+        - 127.0.0.0/8
+        - 169.254.0.0/16
+        - 172.16.0.0/12
+        - 192.0.0.0/24
+        - 192.0.2.0/24
+        - 192.168.0.0/16
+        - 198.18.0.0/15
+        - 198.51.100.0/24
+        - 203.0.113.0/24
+        - 224.0.0.0/4
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 8000
+  - to:
+    - ipBlock:
+        cidr: ::/0
+        except:
+        - ::/128
+        - ::1/128
+        - 100::/64
+        - 2001:2::/48
+        - 2001:10::/28
+        - 2001:db8::/32
+        - fc00::/7
+        - fe80::/10
+        - ff00::/8
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 8000
