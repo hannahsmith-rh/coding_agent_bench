@@ -1,50 +1,46 @@
-import base64
-import json
-from email.mime.text import MIMEText
-from typing import Any
+import os
+import smtplib
+from email.message import EmailMessage
 
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-
-GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
+SMTP_DEFAULT_HOST = "smtp.corp.redhat.com"
+SMTP_DEFAULT_PORT = 25
+SMTP_TIMEOUT_SECONDS = 30
 
 
-def _build_gmail_service(credentials_path: str) -> Any:
-    """Build a Gmail client from a mailbox OAuth credential file.
+def _smtp_settings() -> tuple[str, int, bool]:
+    """Read SMTP connection settings from the environment.
 
-    The Sheets client uses a service account, but a service account is not a
-    Gmail mailbox. Without domain-wide delegation it cannot send through
-    ``users.messages.send(userId='me')``. Gmail notifications therefore use an
-    authorized-user credential containing a refresh token for the sender's
-    mailbox (or an allowed From alias).
+    The default relay is reachable from the internal network and does not
+    require mailbox credentials. STARTTLS remains opt-in for environments
+    where the relay requires it.
     """
-    with open(credentials_path, encoding="utf-8") as credential_file:
-        credential_info = json.load(credential_file)
-    if credential_info.get("type") == "service_account":
-        raise ValueError(
-            "Gmail notifications require mailbox OAuth credentials; a service-account "
-            "credential cannot send as a mailbox without domain-wide delegation"
-        )
+    host = os.environ.get("SMTP_HOST", SMTP_DEFAULT_HOST)
     try:
-        creds = Credentials.from_authorized_user_file(
-            credentials_path,
-            scopes=GMAIL_SCOPES,
-        )
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "Gmail credentials must be an authorized-user OAuth token file"
-        ) from exc
-    return build("gmail", "v1", credentials=creds)
+        port = int(os.environ.get("SMTP_PORT", str(SMTP_DEFAULT_PORT)))
+    except ValueError as exc:
+        raise ValueError("SMTP_PORT must be an integer") from exc
+    starttls = os.environ.get("SMTP_STARTTLS", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    return host, port, starttls
 
 
-def _send_email(service, sender: str, to: str, subject: str, body_text: str) -> None:
-    """Encode and send a plain-text message through Gmail."""
-    message = MIMEText(body_text)
-    message["to"] = to
-    message["from"] = sender
-    message["subject"] = subject
-    raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
-    service.users().messages().send(userId="me", body={"raw": raw}).execute()
+def _send_email(sender: str, to: str, subject: str, body_text: str) -> None:
+    """Send a plain-text message through the internal SMTP relay."""
+    message = EmailMessage()
+    message["To"] = to
+    message["From"] = sender
+    message["Subject"] = subject
+    message.set_content(body_text)
+
+    smtp_host, smtp_port, starttls = _smtp_settings()
+    with smtplib.SMTP(smtp_host, smtp_port, timeout=SMTP_TIMEOUT_SECONDS) as server:
+        if starttls:
+            server.starttls()
+        server.send_message(message)
 
 
 def send_queued_email(
@@ -54,10 +50,8 @@ def send_queued_email(
     model_name: str,
     job_id: str,
     sender: str,
-    gmail_credentials_path: str,
 ) -> None:
     """Notify a requester that their benchmark has entered the queue."""
-    service = _build_gmail_service(gmail_credentials_path)
     subject = f"Benchmark request queued: {agent} / {dataset}"
     body = (
         f"Your benchmark request has been queued.\n\n"
@@ -66,24 +60,22 @@ def send_queued_email(
         f"Model: {model_name}\n"
         f"Job ID: {job_id}\n"
     )
-    _send_email(service, sender, to, subject, body)
+    _send_email(sender, to, subject, body)
 
 
 def send_completed_email(
     to: str,
     job_id: str,
     sender: str,
-    gmail_credentials_path: str,
 ) -> None:
     """Notify a requester that their benchmark completed and link to results."""
-    service = _build_gmail_service(gmail_credentials_path)
     subject = f"Benchmark job completed: {job_id}"
     body = (
         f"Your benchmark job {job_id} has completed.\n\n"
         f"You can view the results on the Coding Agent Leaderboard:\n"
         f"https://huggingface.co/spaces/taagarwa/coding-agent-leaderboard\n"
     )
-    _send_email(service, sender, to, subject, body)
+    _send_email(sender, to, subject, body)
 
 
 def send_failed_email(
@@ -91,14 +83,12 @@ def send_failed_email(
     job_id: str,
     error: str,
     sender: str,
-    gmail_credentials_path: str,
 ) -> None:
     """Notify a requester that their benchmark failed and explain how to get help."""
-    service = _build_gmail_service(gmail_credentials_path)
     subject = f"Benchmark job failed: {job_id}"
     body = (
         f"Your benchmark job {job_id} has failed.\n\n"
         f"Error: {error}\n\n"
         f"Reply to this email and the team will look into it or help you resubmit.\n"
     )
-    _send_email(service, sender, to, subject, body)
+    _send_email(sender, to, subject, body)

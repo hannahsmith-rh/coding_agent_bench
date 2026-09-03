@@ -28,8 +28,10 @@ spec:
             env:
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: /etc/google/service-account.json
-            - name: GMAIL_CREDENTIALS_PATH
-              value: /etc/google/gmail-credentials.json
+            - name: SMTP_HOST
+              value: smtp.corp.redhat.com
+            - name: SMTP_PORT
+              value: "25"
             - name: GOOGLE_SHEET_ID
               valueFrom:
                 secretKeyRef:

@@ -94,7 +94,6 @@ def process_rows(
     api_base_url: str,
     api_key: str,
     sender_email: str,
-    gmail_credentials_path: str,
 ) -> None:
     """Process approved, in-flight, and pending-notification spreadsheet rows."""
     rows = sheets.get_all_rows()
@@ -113,19 +112,19 @@ def process_rows(
                 ):
                     _handle_inflight_row(
                         sheets, row, row_num, api_base_url, api_key,
-                        sender_email, gmail_credentials_path,
+                        sender_email,
                     )
                 continue
 
             if status == Status.APPROVED.value or (not status and _auto_approve_enabled()):
                 _handle_new_row(
                     sheets, row, row_num, api_base_url, api_key,
-                    sender_email, gmail_credentials_path,
+                    sender_email,
                 )
             elif status in (Status.QUEUED.value, Status.RUNNING.value):
                 _handle_inflight_row(
                     sheets, row, row_num, api_base_url, api_key,
-                    sender_email, gmail_credentials_path,
+                    sender_email,
                 )
         except Exception:
             logger.exception("Failed to process row %d", row_num)
@@ -138,7 +137,6 @@ def _handle_new_row(
     api_base_url: str,
     api_key: str,
     sender_email: str,
-    gmail_credentials_path: str,
 ) -> None:
     """Validate and submit one approved intake row, then notify its submitter."""
     agent = row[Column.AGENT].strip()
@@ -182,7 +180,7 @@ def _handle_new_row(
     sheets.update_cell(row_num, Column.STATUS, Status.QUEUED.value)
 
     try:
-        send_queued_email(email, agent, dataset, model_name, job_id, sender_email, gmail_credentials_path)
+        send_queued_email(email, agent, dataset, model_name, job_id, sender_email)
         sheets.update_cell(row_num, Column.NOTIFIED_QUEUED, "TRUE")
     except Exception:
         logger.exception("Failed to send queued email for row %d", row_num)
@@ -195,7 +193,6 @@ def _handle_inflight_row(
     api_base_url: str,
     api_key: str,
     sender_email: str,
-    gmail_credentials_path: str,
 ) -> None:
     """Synchronize queue status and retry a terminal notification when necessary."""
     job_id = row[Column.JOB_ID].strip()
@@ -219,7 +216,7 @@ def _handle_inflight_row(
             sheets.update_cell(row_num, Column.STATUS, Status.COMPLETED.value)
         if not notified_done:
             try:
-                send_completed_email(email, job_id, sender_email, gmail_credentials_path)
+                send_completed_email(email, job_id, sender_email)
                 sheets.update_cell(row_num, Column.NOTIFIED_DONE, "TRUE")
             except Exception:
                 logger.exception("Failed to send completed email for row %d", row_num)
@@ -232,7 +229,7 @@ def _handle_inflight_row(
             sheets.update_cell(row_num, Column.ERROR, error)
         if not notified_done:
             try:
-                send_failed_email(email, job_id, error, sender_email, gmail_credentials_path)
+                send_failed_email(email, job_id, error, sender_email)
                 sheets.update_cell(row_num, Column.NOTIFIED_DONE, "TRUE")
             except Exception:
                 logger.exception("Failed to send failed email for row %d", row_num)
@@ -262,7 +259,6 @@ if __name__ == "__main__":
     load_dotenv()
 
     credentials_path = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
-    gmail_credentials_path = os.environ.get("GMAIL_CREDENTIALS_PATH", credentials_path)
     sheet_id = os.environ["GOOGLE_SHEET_ID"]
     api_base_url = os.environ["JOB_QUEUE_URL"]
     _validate_queue_url(api_base_url)
@@ -270,5 +266,5 @@ if __name__ == "__main__":
     sender_email = os.environ["SENDER_EMAIL"]
 
     client = SheetsClient(credentials_path, sheet_id)
-    process_rows(client, api_base_url, api_key, sender_email, gmail_credentials_path)
+    process_rows(client, api_base_url, api_key, sender_email)
     logger.info("Poller run complete")

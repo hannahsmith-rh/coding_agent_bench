@@ -44,7 +44,6 @@ def test_approved_row_is_submitted(mock_httpx, mock_email):
         api_base_url="http://job-queue-service",
         api_key="test-key",
         sender_email="bench@example.com",
-        gmail_credentials_path="/fake/path.json",
     )
 
     mock_httpx.post.assert_called_once()
@@ -71,7 +70,6 @@ def test_empty_status_row_skipped_in_manual_mode(mock_httpx):
         api_base_url="http://job-queue-service",
         api_key="test-key",
         sender_email="bench@example.com",
-        gmail_credentials_path="/fake/path.json",
     )
 
     mock_httpx.post.assert_not_called()
@@ -101,7 +99,6 @@ def test_empty_status_row_submitted_when_auto_approve(mock_httpx, mock_email):
         api_base_url="http://job-queue-service",
         api_key="test-key",
         sender_email="bench@example.com",
-        gmail_credentials_path="/fake/path.json",
     )
 
     mock_httpx.post.assert_called_once()
@@ -123,7 +120,6 @@ def test_invalid_approved_row_marked_needs_review(mock_httpx, mock_email):
         api_base_url="http://job-queue-service",
         api_key="test-key",
         sender_email="bench@example.com",
-        gmail_credentials_path="/fake/path.json",
     )
 
     mock_httpx.post.assert_not_called()
@@ -143,7 +139,6 @@ def test_approved_row_with_existing_job_id_skips_resubmission(mock_httpx):
         api_base_url="http://job-queue-service",
         api_key="test-key",
         sender_email="bench@example.com",
-        gmail_credentials_path="/fake/path.json",
     )
 
     mock_httpx.post.assert_not_called()
@@ -178,7 +173,6 @@ def test_queued_row_updated_to_completed(mock_httpx, mock_email):
         api_base_url="http://job-queue-service",
         api_key="test-key",
         sender_email="bench@example.com",
-        gmail_credentials_path="/fake/path.json",
     )
 
     sheets.update_cell.assert_any_call(1, Column.STATUS, Status.COMPLETED.value)
@@ -212,7 +206,6 @@ def test_running_row_updated_to_failed(mock_httpx, mock_email):
         api_base_url="http://job-queue-service",
         api_key="test-key",
         sender_email="bench@example.com",
-        gmail_credentials_path="/fake/path.json",
     )
 
     sheets.update_cell.assert_any_call(1, Column.STATUS, Status.FAILED.value)
@@ -231,7 +224,6 @@ def test_already_completed_row_is_skipped(mock_httpx):
         api_base_url="http://job-queue-service",
         api_key="test-key",
         sender_email="bench@example.com",
-        gmail_credentials_path="/fake/path.json",
     )
 
     mock_httpx.post.assert_not_called()
@@ -257,7 +249,6 @@ def test_completed_row_with_pending_notification_is_retried(mock_httpx, mock_ema
         api_base_url="http://job-queue-service",
         api_key="test-key",
         sender_email="bench@example.com",
-        gmail_credentials_path="/fake/path.json",
     )
 
     mock_httpx.get.assert_called_once()
@@ -287,7 +278,6 @@ def test_failed_row_with_pending_notification_is_retried(mock_httpx, mock_email)
         api_base_url="http://job-queue-service",
         api_key="test-key",
         sender_email="bench@example.com",
-        gmail_credentials_path="/fake/path.json",
     )
 
     mock_httpx.get.assert_called_once()
