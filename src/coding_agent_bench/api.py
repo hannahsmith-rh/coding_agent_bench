@@ -18,6 +18,11 @@ from coding_agent_bench.intake.validation import validate_server_url
 from coding_agent_bench.job import OpenshiftJob
 from coding_agent_bench.nebius_utils import NebiusInstanceManager, RESOURCE_CONFIG_REGISTRY
 from coding_agent_bench.models import ModelConfig, MODEL_REGISTRY
+from coding_agent_bench.utils import validate_remote_skill_sources
+from coding_agent_bench.providers import is_openrouter, resolve_provider, OPENROUTER_UNSUPPORTED_AGENTS
+from coding_agent_bench.agents import AGENT_REGISTRY
+from coding_agent_bench.ui import build_submit_form_html
+from coding_agent_bench import VERSION
 
 import getpass
 import json
@@ -264,13 +269,19 @@ class CreateJobRequest(BaseModel):
     agent: SupportedAgent = Field(..., description="Agent to use")
     dataset: str = Field(..., description="Dataset name or path")
     model_name: str = Field(..., description="Model name")
-    server_url: str = Field(..., description="Model server URL, or 'nebius-<resource>' (e.g. nebius-h200) for managed Nebius instances")
+    server_url: str = Field(..., description="Model server URL; 'nebius-<resource>' (e.g. nebius-h200) for managed Nebius instances; or 'openrouter' to use OpenRouter (requires OPENROUTER_API_KEY on the server)")
     dataset_pattern: Optional[str] = Field(None, description="Pattern to filter dataset tasks")
     n_concurrent: int | None = Field(None, description="Number of concurrent tasks")
     n_tasks: Optional[int] = Field(None, description="Total number of tasks to run")
     model_max_len: int | None = Field(None, description="Maximum model context length in tokens")
     before_script: Optional[str] = Field(None, description="Script to run before harbor job execution")
     agent_version: Optional[str] = Field(None, description="Pin agent to a specific version (overrides default)")
+    max_retries: Optional[int] = Field(None, description="Max retry attempts per task (default: 1)")
+    retry_include: Optional[list[str]] = Field(None, description="Error types to retry (default: AgentTimeoutError, NonZeroAgentExitCodeError, ApiRateLimitError, ApiUsageLimitError)")
+    skills: list[str] = Field(
+        default_factory=list,
+        description="Public Git skill sources in org/name[@ref] or HTTP(S) URL form",
+    )
     idempotency_key: Optional[str] = Field(
         None,
         max_length=256,
@@ -500,6 +511,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(lifespan=lifespan)
 router = APIRouter(dependencies=[Depends(_verify_api_key)])
 
+# Public UI router (no API key required)
+ui_router = APIRouter()
+
 
 async def _run_oc(command: list[str], timeout_sec: int = 30) -> str:
     """Run an oc command with timeout and process-kill handling."""
@@ -562,6 +576,7 @@ async def _run_job(
     command: list[str],
     server_url: str | None = None,
     managed_endpoint: bool = False,
+    openrouter: bool = False,
 ):
     """Validate, run, and monitor an OpenShift Job."""
     global _active_job
@@ -589,7 +604,7 @@ async def _run_job(
         if is_resume:
             job_spec = oj._resume_job_spec(command[2])
         else:
-            job_spec = oj._job_spec(command)
+            job_spec = oj._job_spec(command, openrouter=openrouter)
         await oj._run_oc_command(
             ["apply", "-f", "-"],
             stdin_data=json.dumps(job_spec).encode(),
@@ -719,7 +734,17 @@ async def _worker():
             if nebius_gpu_config is not None and _nebius:
                 try:
                     nebius_instance_name, real_url = await _nebius.acquire_instance(model_name, gpu_config=nebius_gpu_config)
-                    command = [real_url if arg == server_url else arg for arg in command]
+                    is_resume = len(command) == 3 and command[0] == "sh" and command[1] == "-c"
+                    if is_resume:
+                        # Inject URL replacement into the resume shell command
+                        job_name = row["job_name"]
+                        orig_name = job_name.removesuffix("--resume")
+                        py_job_dir = f"/app/jobs/{orig_name}"
+                        step = _build_url_replace_shell_step(real_url, py_job_dir)
+                        command = list(command)
+                        command[2] = command[2].replace(" && uv run", f"{step} && uv run", 1)
+                    else:
+                        command = [real_url if arg == server_url else arg for arg in command]
                     job_server_url = real_url
                     managed_endpoint = True
                     model_config = MODEL_REGISTRY.get(model_name)
@@ -738,6 +763,7 @@ async def _worker():
                 command,
                 server_url=job_server_url,
                 managed_endpoint=managed_endpoint,
+                openrouter=is_openrouter(server_url),
             )
 
             if nebius_instance_name and _nebius:
@@ -803,20 +829,69 @@ async def ui():
             nebius_rows = f'<tr><td colspan="{len(nebius_cols)}">No instances</td></tr>'
         nebius_section = f"<h2>Nebius Instances</h2><table><tr>{nebius_header}</tr>{nebius_rows}</table>"
 
+    # Build API key input section
+    api_key_section = """
+<div id="api-key-section" style="margin-bottom: 1.5rem; padding: 0.75rem; border: 1px solid #ddd; border-radius: 8px; background: #fffbe6;">
+    <label for="api-key-input" style="font-weight: bold;">API Key:</label>
+    <input type="password" id="api-key-input" placeholder="Enter your API key"
+           style="margin-left: 0.5rem; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; width: 300px;">
+    <button type="button" onclick="saveApiKey()" style="margin-left: 0.5rem; padding: 0.5rem 1rem; background: #0066cc; color: white; border: none; border-radius: 4px; cursor: pointer;">Save</button>
+    <button type="button" onclick="clearApiKey()" style="margin-left: 0.25rem; padding: 0.5rem 1rem; background: #666; color: white; border: none; border-radius: 4px; cursor: pointer;">Clear</button>
+    <span id="api-key-status" style="margin-left: 1rem;"></span>
+</div>
+<script>
+function saveApiKey() {{
+    const key = document.getElementById('api-key-input').value.trim();
+    if (key) {{
+        localStorage.setItem('coding_agent_bench_api_key', key);
+        document.getElementById('api-key-status').textContent = 'API key saved.';
+        document.getElementById('api-key-status').style.color = 'green';
+    }}
+}}
+function clearApiKey() {{
+    localStorage.removeItem('coding_agent_bench_api_key');
+    document.getElementById('api-key-input').value = '';
+    document.getElementById('api-key-status').textContent = 'API key cleared.';
+    document.getElementById('api-key-status').style.color = '#cc6600';
+}}
+(function() {{
+    const savedKey = localStorage.getItem('coding_agent_bench_api_key');
+    if (savedKey) {{
+        document.getElementById('api-key-input').value = savedKey;
+    }}
+}})();
+</script>
+"""
+
+    # Build submit form with current data
+    nebius_enabled = os.environ.get("NEBIUS_ENABLED") == "1"
+    submit_form_html = build_submit_form_html(
+        models=list(MODEL_REGISTRY.keys()),
+        agents=list(AGENT_REGISTRY.keys()),
+        nebius_configs=list(RESOURCE_CONFIG_REGISTRY.keys()) if nebius_enabled else [],
+        nebius_enabled=nebius_enabled,
+    )
+
     html_page = f"""<!DOCTYPE html>
 <html>
 <head>
 <title>Job Queue</title>
-<meta http-equiv="refresh" content="5">
 <style>
 body {{ font-family: sans-serif; margin: 2rem; }}
 table {{ border-collapse: collapse; width: 100%; margin-bottom: 2rem; }}
 th, td {{ border: 1px solid #ccc; padding: 0.5rem; text-align: left; }}
 th {{ background: #f5f5f5; }}
+h1 {{ display: flex; align-items: center; gap: 0.75rem; }}
+h1 svg {{ flex-shrink: 0; }}
 </style>
 </head>
 <body>
-<h1>Job Queue</h1>
+<h1>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 145" width="32" height="32" aria-hidden="true"><style>.cls-1{{fill:#e00;}}</style><path d="M157.77,62.61a14,14,0,0,1,.31,3.42c0,14.88-18.1,17.46-30.61,17.46C78.83,83.49,42.53,53.26,42.53,44a6.43,6.43,0,0,1,.22-1.94l-3.66,9.06a18.45,18.45,0,0,0-1.51,7.33c0,18.11,41,45.48,87.74,45.48,20.69,0,36.43-7.76,36.43-21.77,0-1.08,0-1.94-1.73-10.13Z"/><path class="cls-1" d="M127.47,83.49c12.51,0,30.61-2.58,30.61-17.46a14,14,0,0,0-.31-3.42l-7.45-32.36c-1.72-7.12-3.23-10.35-15.73-16.6C124.89,8.69,103.76.5,97.51.5,91.69.5,90,8,83.06,8c-6.68,0-11.64-5.6-17.89-5.6-6,0-9.91,4.09-12.93,12.5,0,0-8.41,23.72-9.49,27.16A6.43,6.43,0,0,0,42.53,44c0,9.22,36.3,39.45,84.94,39.45M160,72.07c1.73,8.19,1.73,9.05,1.73,10.13,0,14-15.74,21.77-36.43,21.77C78.54,104,37.58,76.6,37.58,58.49a18.45,18.45,0,0,1,1.51-7.33C22.27,52,.5,55,.5,74.22c0,31.48,74.59,70.28,133.65,70.28,45.28,0,56.7-20.48,56.7-36.65,0-12.72-11-27.16-30.83-35.78"/></svg>
+  Job Queue <font size="4">v{VERSION}</font>
+</h1>
+{api_key_section}
+{submit_form_html}
 {nebius_section}
 {build_table("Running", running)}
 {build_table("Queued", queued)}
@@ -856,6 +931,13 @@ def build_cli_command(req: CreateJobRequest):
         command += ["--before-script", req.before_script]
     if req.agent_version:
         command += ["--agent-version", req.agent_version]
+    if req.max_retries is not None:
+        command += ["--max-retries", str(req.max_retries)]
+    if req.retry_include is not None:
+        for exc in req.retry_include:
+            command += ["--retry-include", exc]
+    for skill in req.skills:
+        command += ["--skill", skill]
 
     return command
 
@@ -900,6 +982,11 @@ async def create_job(
         if existing:
             return _job_create_response(existing, message="Job already exists.")
 
+    try:
+        validate_remote_skill_sources(req.skills)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
     # Skip harbor command validation for nebius jobs (server_url is a placeholder)
     nebius_gpu_config = _parse_nebius_url(req.server_url)
     if nebius_gpu_config is not None:
@@ -910,6 +997,18 @@ async def create_job(
                 status_code=400,
                 detail=f"Unknown resource config '{nebius_gpu_config}'. Choose from: {', '.join(RESOURCE_CONFIG_REGISTRY)}",
             )
+    elif is_openrouter(req.server_url):
+        # Skip HarborCommandBuilder().build() for openrouter jobs: build() runs
+        # each agent's configure(), and PiAgentConfig.configure() writes the
+        # real OpenRouter key to models.json on the API host's CWD as a side
+        # effect. Validate cheaply instead, deferring dataset-existence checks
+        # to run time (same trade-off as the nebius branch above).
+        try:
+            resolve_provider(req.server_url)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if req.agent.value in OPENROUTER_UNSUPPORTED_AGENTS:
+            raise HTTPException(status_code=400, detail=f"agent '{req.agent.value}' cannot use OpenRouter")
     else:
         if req.server_url.lower() != "openrouter":
             server_url_errors = validate_server_url(req.server_url)
@@ -927,6 +1026,7 @@ async def create_job(
                 n_tasks=req.n_tasks,
                 model_max_len=req.model_max_len,
                 job_name=req.job_name,
+                skills=req.skills,
             )
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
@@ -1002,6 +1102,56 @@ async def delete_job(job_id: str):
 
     return {"message": "Job cancelled", "job_id": job_id}
 
+def _build_url_replace_shell_step(server_url: str, py_job_dir: str) -> str:
+    """Build shell step that replaces model server URLs in downloaded job files."""
+    new_host = urlparse(server_url.rstrip("/")).netloc
+    new_domain = ".".join(new_host.rsplit(".", 2)[-2:])
+    replace_lines = [
+        "import os, json, re",
+        f"job_dir = {json.dumps(py_job_dir)}",
+        f"new_host = {json.dumps(new_host)}",
+        f"new_domain = {json.dumps(new_domain)}",
+        "config_path = os.path.join(job_dir, 'config.json')",
+        "if not os.path.exists(config_path): exit(0)",
+        "with open(config_path) as f: c = json.load(f)",
+        "envs = c.get('agents', [{}])[0].get('env', {})",
+        "hosts = set()",
+        "for v in envs.values():",
+        "    if not isinstance(v, str): continue",
+        "    for m in re.finditer('https?://([^\"\\\\s,}/]+)', v):",
+        "        hosts.add(m.group(1).split('/')[0])",
+        "hosts = [h for h in hosts if h != new_host and h.endswith(new_domain)]",
+        "replaced = 0",
+        "if hosts:",
+        "    for root, dirs, files in os.walk(job_dir):",
+        "        for file in files:",
+        "            if not file.endswith('.json'): continue",
+        "            path = os.path.join(root, file)",
+        "            with open(path, 'r') as f: content = f.read()",
+        "            orig = content",
+        "            for h in hosts: content = content.replace(h, new_host)",
+        "            if content != orig:",
+        "                with open(path, 'w') as f: f.write(content)",
+        "                replaced += 1",
+        "print(f'Replaced URL in {replaced} files')",
+        "# Regenerate Pi/Codex mount files with new URL",
+        f"server_url = {json.dumps(server_url)}",
+        "agent = c.get('agents', [{}])[0]",
+        "model_name = agent.get('model_name', '')",
+        "mounts = c.get('environment', {}).get('mounts', [])",
+        "for m in mounts:",
+        "    src, tgt = m.get('source',''), m.get('target','')",
+        "    if agent.get('name') == 'pi' and 'models.json' in tgt:",
+        "        json.dump({'providers': {'vllm': {'baseUrl': server_url, 'api': 'openai-completions', 'apiKey': 'NONE', 'models': [{'id': model_name, 'name': model_name}]}}}, open(src, 'w'))",
+        "        print('Regenerated Pi models.json')",
+        "    if agent.get('name') == 'codex' and 'config.toml' in tgt:",
+        "        open(src, 'w').write(f'[api]\\nbase_url = \"{server_url}\"\\napi_key = \"sk-no-key\"\\n[model]\\nmodel_id = \"{model_name}\"\\n')",
+        "        print('Regenerated Codex config.toml')",
+    ]
+    replace_script = "\n".join(replace_lines)
+    return f" && python3 -c {shlex.quote(replace_script)}"
+
+
 @router.post("/jobs/{job_id}/resume")
 async def resume_job(job_id: str, req: ResumeJobRequest = ResumeJobRequest()):
     """Resume a completed/failed job by retrying errored tasks via harbor jobs resume."""
@@ -1018,58 +1168,31 @@ async def resume_job(job_id: str, req: ResumeJobRequest = ResumeJobRequest()):
     resume_job_id = str(uuid.uuid4())
     resume_job_name = f"{original_job_name}--resume"
 
+    original_server_url = job_row.get("server_url", "")
+    effective_server_url = req.server_url or original_server_url
+
+    # Validate nebius URLs the same way create_job does
+    nebius_gpu_config = _parse_nebius_url(effective_server_url)
+    if nebius_gpu_config is not None:
+        if not _nebius:
+            raise HTTPException(status_code=400, detail="Nebius is not enabled on this server")
+        if nebius_gpu_config not in RESOURCE_CONFIG_REGISTRY:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown resource config '{nebius_gpu_config}'. Choose from: {', '.join(RESOURCE_CONFIG_REGISTRY)}",
+            )
+
     filter_flags = "".join(f" -f {shlex.quote(t)}" for t in req.filter_error_types)
     job_dir = f"/app/jobs/{shlex.quote(original_job_name)}"
     py_job_dir = f"/app/jobs/{original_job_name}"
 
+    # URL replacement only applies to real, changing hostnames (e.g. a new
+    # nebius instance IP). It is skipped for nebius placeholders (deferred to
+    # the worker) and for the openrouter sentinel, whose URL is static and
+    # already baked into the restored config.
     url_replace_step = ""
-    if req.server_url:
-        new_host = urlparse(req.server_url.rstrip("/")).netloc
-        new_domain = ".".join(new_host.rsplit(".", 2)[-2:])
-        replace_lines = [
-            "import os, json, re",
-            f"job_dir = {json.dumps(py_job_dir)}",
-            f"new_host = {json.dumps(new_host)}",
-            f"new_domain = {json.dumps(new_domain)}",
-            "config_path = os.path.join(job_dir, 'config.json')",
-            "if not os.path.exists(config_path): exit(0)",
-            "with open(config_path) as f: c = json.load(f)",
-            "envs = c.get('agents', [{}])[0].get('env', {})",
-            "hosts = set()",
-            "for v in envs.values():",
-            "    if not isinstance(v, str): continue",
-            "    for m in re.finditer('https?://([^\"\\\\s,}/]+)', v):",
-            "        hosts.add(m.group(1).split('/')[0])",
-            "hosts = [h for h in hosts if h != new_host and h.endswith(new_domain)]",
-            "replaced = 0",
-            "if hosts:",
-            "    for root, dirs, files in os.walk(job_dir):",
-            "        for file in files:",
-            "            if not file.endswith('.json'): continue",
-            "            path = os.path.join(root, file)",
-            "            with open(path, 'r') as f: content = f.read()",
-            "            orig = content",
-            "            for h in hosts: content = content.replace(h, new_host)",
-            "            if content != orig:",
-            "                with open(path, 'w') as f: f.write(content)",
-            "                replaced += 1",
-            "print(f'Replaced URL in {replaced} files')",
-            "# Regenerate Pi/Codex mount files with new URL",
-            f"server_url = {json.dumps(req.server_url)}",
-            "agent = c.get('agents', [{}])[0]",
-            "model_name = agent.get('model_name', '')",
-            "mounts = c.get('environment', {}).get('mounts', [])",
-            "for m in mounts:",
-            "    src, tgt = m.get('source',''), m.get('target','')",
-            "    if agent.get('name') == 'pi' and 'models.json' in tgt:",
-            "        json.dump({'providers': {'vllm': {'baseUrl': server_url, 'api': 'openai-completions', 'apiKey': 'NONE', 'models': [{'id': model_name, 'name': model_name}]}}}, open(src, 'w'))",
-            "        print('Regenerated Pi models.json')",
-            "    if agent.get('name') == 'codex' and 'config.toml' in tgt:",
-            "        open(src, 'w').write(f'[api]\\nbase_url = \"{server_url}\"\\napi_key = \"sk-no-key\"\\n[model]\\nmodel_id = \"{model_name}\"\\n')",
-            "        print('Regenerated Codex config.toml')",
-        ]
-        replace_script = "\n".join(replace_lines)
-        url_replace_step = f" && python3 -c {shlex.quote(replace_script)}"
+    if req.server_url and nebius_gpu_config is None and not is_openrouter(req.server_url):
+        url_replace_step = _build_url_replace_shell_step(req.server_url, py_job_dir)
 
     shell_command = (
         "mc alias set minio http://harbor-minio:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD"
@@ -1081,13 +1204,11 @@ async def resume_job(job_id: str, req: ResumeJobRequest = ResumeJobRequest()):
     )
 
     command = ["sh", "-c", shell_command]
-    # Resume jobs inherit the original job's server_url
-    original_server_url = job_row.get("server_url", "")
     job_store.insert(
         resume_job_id, resume_job_name, job_row["agent"],
-        job_row["dataset"], job_row["model_name"], original_server_url, command,
+        job_row["dataset"], job_row["model_name"], effective_server_url, command,
     )
-    _job_queue.append(QueuedJob(resume_job_id, command, original_server_url, job_row["model_name"]))
+    _job_queue.append(QueuedJob(resume_job_id, command, effective_server_url, job_row["model_name"]))
     _job_event.set()
 
     return {
@@ -1097,5 +1218,30 @@ async def resume_job(job_id: str, req: ResumeJobRequest = ResumeJobRequest()):
         "parent_job_id": job_id,
     }
 
+@router.get("/models")
+async def get_models():
+    """List available models for managed servers."""
+    models = list(MODEL_REGISTRY.keys())
+    return {"models": models}
+
+@ui_router.get("/api/models")
+async def get_models_public():
+    """List available models (public endpoint for UI)."""
+    return {"models": list(MODEL_REGISTRY.keys())}
+
+@ui_router.get("/api/agents")
+async def get_agents():
+    """List available agents (public endpoint for UI)."""
+    return {"agents": list(AGENT_REGISTRY.keys())}
+
+@ui_router.get("/api/nebius-configs")
+async def get_nebius_configs():
+    """List available nebius resource configs (public endpoint for UI)."""
+    nebius_enabled = os.environ.get("NEBIUS_ENABLED") == "1"
+    return {
+        "nebius_enabled": nebius_enabled,
+        "configs": list(RESOURCE_CONFIG_REGISTRY.keys()),
+    }
 
 app.include_router(router)
+app.include_router(ui_router)

@@ -46,8 +46,8 @@ def test_task_egress_policy_does_not_select_orchestrator_pods():
         "spec"
     ]["template"]["metadata"]["labels"]
 
-    assert policy_selector == {"app": "harbor", "component": "task"}
-    assert orchestrator_labels == {"app": "harbor", "component": "orchestrator"}
+    assert policy_selector == {"app": "harbor"}
+    assert orchestrator_labels == {"app": "harbor-orchestrator", "component": "orchestrator"}
 
 
 def test_managed_worker_endpoint_must_be_public():

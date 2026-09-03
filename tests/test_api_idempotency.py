@@ -16,6 +16,7 @@ def isolated_queue(tmp_path, monkeypatch):
     api.job_store = api.JobStore(tmp_path / "jobs.db")
     api._job_queue.clear()
     monkeypatch.setenv("ALLOWED_SERVER_HOSTS", "vllm.example.com")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
     try:
         yield
     finally:
@@ -27,7 +28,7 @@ def _request(key: str = "intake-test-key") -> api.CreateJobRequest:
     """Build a minimal queue request suitable for an idempotency test."""
     return api.CreateJobRequest(
         job_name="intake-test",
-        agent="oracle",
+        agent="codex",
         dataset="swe-bench/swe-bench-verified",
         model_name="Qwen/Qwen3-32B",
         server_url="openrouter",

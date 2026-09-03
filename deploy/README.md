@@ -186,10 +186,10 @@ termination, keeping router-to-pod traffic encrypted as well. Apply the
 manifest before starting the poller and wait for `job-queue-tls` to be created.
 
 The same manifest installs `harbor-task-egress`, selecting only generated task
-pods (`app=harbor`, `component=task`). It allows DNS, the in-cluster MinIO
+pods (`app=harbor`; native Harbor also adds a session label). It allows DNS, the in-cluster MinIO
 service, and public TCP 443/8000 while excluding private, loopback, link-local,
 benchmark, and multicast CIDRs. Orchestrator pods use
-`component=orchestrator`, so they retain the OpenShift API access needed to
+`app=harbor-orchestrator`, so they retain the OpenShift API access needed to
 create and clean up task pods. If your cluster uses a different DNS or MinIO
 network topology, adjust the policy rather than removing it.
 

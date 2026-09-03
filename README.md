@@ -20,6 +20,7 @@ Reproducible benchmarks for coding agents and models using Harbor
 - [CLI Utility](#cli-utility)
   - [Prerequisites](#prerequisites)
   - [Run a Benchmark](#run-a-benchmark)
+  - [Use Agent Skills](#use-agent-skills)
 - [Queue Service](#queue-service)
   - [Set up the service](#set-up-the-service)
   - [Use the service](#use-the-service)
@@ -43,7 +44,6 @@ Reproducible benchmarks for coding agents and models using Harbor
   - [Run Tasks in Openshift (Orchestrate Locally)](#run-tasks-in-openshift-orchestrate-locally)
   - [Run Tasks and Orchestrate in Openshift](#run-tasks-and-orchestrate-in-openshift)
 - [WIP](#wip)
-  - [Run with Podman](#run-with-podman)
   - [Run with Gemini and Gemini CLI](#run-with-gemini-and-gemini-cli)
   - [Run with vLLM and Gemini CLI](#run-with-vllm-and-gemini-cli)
 
@@ -141,6 +141,44 @@ If you want to see a preview of Harbor command that would be run for a given set
 > [!note]
 > Additional configuration options are available, use `uv run coding-agent-bench run --help` to see them.
 
+### Use Agent Skills
+
+Pass one or more skill directories or Git sources with the repeatable `--skill`
+option (`--skills` is an alias). Harbor installs the resolved skills into the
+agent used by the benchmark.
+
+To test a skill from your local filesystem:
+
+```sh
+uv run coding-agent-bench run \
+    --agent opencode \
+    --dataset swe-bench/swe-bench-verified \
+    --model-name my-model \
+    --server-url http://my.server.url \
+    --skill ./my-skills
+```
+
+Git sources make skills easy to share and reproduce. Repeat the option to test
+multiple skill collections, for example Superpowers together with Caveman:
+
+```sh
+uv run coding-agent-bench run \
+    --agent claude-code \
+    --dataset swe-bench/swe-bench-verified \
+    --model-name my-model \
+    --server-url http://my.server.url \
+    --skill obra/superpowers \
+    --skill juliusbrussee/caveman
+```
+
+Harbor accepts `org/name` and `org/name@ref` shorthand and HTTP(S) Git URLs.
+Repository shorthand loads skills from the repository's `skills/` directory.
+Use a full URL such as
+`https://github.com/org/repo/tree/<ref>/<subdir>` to select another directory.
+Pin a tag or named branch with `@ref` (or in the full URL) when comparing
+benchmark runs. Harbor resolves the reference to a commit and records that
+commit in the job lock file for reproducibility.
+
 ## Queue Service
 
 The queue service is a FastAPI application that can be deployed on OpenShift to queue and run benchmarks automatically.
@@ -203,6 +241,22 @@ sequenceDiagram
     ```sh
     oc apply -f deploy/job-queue-service.yml
     ```
+6. (Optional) To run jobs against OpenRouter (`server_url: openrouter`), create
+   an `openrouter-api-key` secret. Job pods mount it automatically (it is
+   optional, so non-OpenRouter jobs are unaffected):
+    ```yaml
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: openrouter-api-key
+    stringData:
+      OPENROUTER_API_KEY: <your-openrouter-api-key>
+    type: Opaque
+    ```
+    The queue service itself also needs `OPENROUTER_API_KEY` in its environment
+    to validate OpenRouter jobs at request time. Add it to `job-queue-secret`
+    (which the service already loads) or `envFrom` the `openrouter-api-key`
+    secret in `deploy/job-queue-service.yml`.
 
     The queue listens on HTTPS inside the cluster. OpenShift's service-serving
     certificate operator creates the `job-queue-tls` Secret referenced by the
@@ -237,10 +291,15 @@ open $JOB_QUEUE_URL/docs
 
 ### Use the service
 
-Queue up a new benchmark task:
+Queue up a new benchmark task. Skills submitted to the queue must be public Git
+sources because the OpenShift job cannot access paths on the requestor's local
+filesystem:
 
 ```sh
-curl -X POST $JOB_QUEUE_URL/jobs -d '{"job_name": "test", "agent": "pi", "dataset": "swe-bench/swe-bench-verified", "model_name": "qwen3.6-27b", "server_url": "<server-url>", "n_tasks": 1}' -H "Content-Type: application/json" -H "X-API-Key: <your-api-key>"
+curl -X POST $JOB_QUEUE_URL/jobs \
+    -d '{"job_name": "test", "agent": "pi", "dataset": "swe-bench/swe-bench-verified", "model_name": "qwen3.6-27b", "server_url": "<server-url>", "n_tasks": 1, "skills": ["obra/superpowers@<ref>"]}' \
+    -H "Content-Type: application/json" \
+    -H "X-API-Key: <your-api-key>"
 ```
 
 ```json
@@ -616,7 +675,7 @@ oc apply -f deploy/harbor-task-sa.yml
 Then in your `harbor` command, add the flag:
 
 ```bash
---environment-import-path coding_agent_bench.harbor_envs.openshift:OpenshiftEnvironment
+--env openshift
 ```
 
 ### Run Tasks and Orchestrate in Openshift
@@ -653,18 +712,22 @@ uv run coding-agent-bench run \
     --environment openshift
 ```
 
-## WIP
-
-### Run with Podman
-
-Requires `podman` on PATH with a running Podman machine.
-
-In your `harbor` command, add the flag:
+Skills used by a remote OpenShift Job must be public Git sources. Local paths
+are rejected because they are not available inside the orchestrator pod. The
+pod also needs outbound network access to the Git host.
 
 ```bash
---environment-import-path coding_agent_bench.harbor_envs.podman:PodmanEnvironment
+uv run coding-agent-bench run \
+    --agent claude-code \
+    --dataset swe-bench/swe-bench-verified \
+    --model-name my-model \
+    --server-url http://my.server.url \
+    --skill obra/superpowers@<ref> \
+    --remote \
+    --environment openshift
 ```
 
+## WIP
 
 ### Run with Gemini and Gemini CLI
 
