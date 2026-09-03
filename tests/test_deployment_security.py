@@ -1,11 +1,10 @@
-"""Deployment and worker-network security regression tests."""
+"""Deployment security regression tests."""
 
 from pathlib import Path
 
 import yaml
 
 from coding_agent_bench import api
-from coding_agent_bench.job import OpenshiftJob
 
 
 DEPLOYMENT_PATH = Path(__file__).parents[1] / "deploy" / "job-queue-service.yml"
@@ -49,18 +48,6 @@ def test_queue_manifest_encrypts_service_and_route():
     assert container_security["allowPrivilegeEscalation"] is False
     assert container_security["capabilities"]["drop"] == ["ALL"]
     assert container_security["seccompProfile"]["type"] == "RuntimeDefault"
-
-
-def test_task_egress_policy_does_not_select_orchestrator_pods():
-    """Keep OpenShift API access on the queue's orchestrator pod."""
-    objects = _deployment_objects()
-    policy_selector = objects["NetworkPolicy"]["spec"]["podSelector"]["matchLabels"]
-    orchestrator_labels = OpenshiftJob("security-test")._job_spec(["echo", "ok"])[
-        "spec"
-    ]["template"]["metadata"]["labels"]
-
-    assert policy_selector == {"app": "harbor"}
-    assert orchestrator_labels == {"app": "harbor-orchestrator", "component": "orchestrator"}
 
 
 def test_managed_worker_endpoint_must_be_public():

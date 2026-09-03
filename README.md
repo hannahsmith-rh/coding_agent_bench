@@ -275,11 +275,6 @@ sequenceDiagram
     oc get secret job-queue-tls
     ```
 
-    The same manifest installs the `harbor-task-egress` NetworkPolicy. It
-    limits generated benchmark task pods to DNS, MinIO, and public model-server
-    ports (443, plus public Nebius vLLM port 8000); the API-side hostname and
-    DNS checks remain the allowlist enforcement.
-
 Get the route for the deployed service:
 
 ```sh

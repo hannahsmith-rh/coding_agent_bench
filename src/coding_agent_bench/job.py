@@ -35,15 +35,9 @@ class OpenshiftJob:
         return {
             "apiVersion": "batch/v1",
             "kind": "Job",
-            "metadata": {
-                "name": self._pod_name,
-                "labels": {"app": "harbor-orchestrator", "component": "orchestrator"},
-            },
+            "metadata": {"name": self._pod_name, "labels": {"app": "harbor"}},
             "spec": {
                 "template": {
-                    "metadata": {
-                        "labels": {"app": "harbor-orchestrator", "component": "orchestrator"},
-                    },
                     "spec": {
                         "restartPolicy": "Never",
                         "serviceAccountName": "harbor-orchestrator",
@@ -94,15 +88,9 @@ class OpenshiftJob:
         return {
             "apiVersion": "batch/v1",
             "kind": "Job",
-            "metadata": {
-                "name": self._pod_name,
-                "labels": {"app": "harbor-orchestrator", "component": "orchestrator"},
-            },
+            "metadata": {"name": self._pod_name, "labels": {"app": "harbor"}},
             "spec": {
                 "template": {
-                    "metadata": {
-                        "labels": {"app": "harbor-orchestrator", "component": "orchestrator"},
-                    },
                     "spec": {
                         "restartPolicy": "Never",
                         "serviceAccountName": "harbor-orchestrator",

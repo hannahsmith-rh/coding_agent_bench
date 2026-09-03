@@ -67,10 +67,10 @@ def validate_server_url(
     """Validate a model URL against the configured public-host allowlist.
 
     Hostnames are resolved during validation so private, loopback, link-local, and
-    reserved addresses cannot be submitted as model endpoints. Cluster operators
-    should also apply equivalent egress restrictions to worker pods because DNS can
-    change after this check. Managed endpoints may opt out of the HTTPS-only check
-    when the provider returns a public HTTP endpoint; ordinary intake URLs remain
+    reserved addresses cannot be submitted as model endpoints. Callers should
+    revalidate immediately before worker creation because DNS can change after
+    this check. Managed endpoints may opt out of the HTTPS-only check when the
+    provider returns a public HTTP endpoint; ordinary intake URLs remain
     HTTPS-only.
     """
     errors: list[str] = []

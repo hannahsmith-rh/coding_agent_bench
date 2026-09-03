@@ -181,7 +181,7 @@ development.
 | `SENDER_EMAIL` | Address notification emails are sent from. Set it to `ace-model-evals@redhat.com`. |
 | `AUTO_APPROVE` | `"true"` to auto-submit rows with a blank status, otherwise `"false"` |
 
-### Queue TLS and worker egress
+### Queue TLS
 
 `deploy/job-queue-service.yml` enables OpenShift's service-serving certificate
 operator with the `service.beta.openshift.io/serving-cert-secret-name`
@@ -191,19 +191,9 @@ the service CA; the queue mounts that Secret and Uvicorn serves HTTPS on port
 termination, keeping router-to-pod traffic encrypted as well. Apply the
 manifest before starting the poller and wait for `job-queue-tls` to be created.
 
-The same manifest installs `harbor-task-egress`, selecting only generated task
-pods (`app=harbor`; native Harbor also adds a session label). It allows DNS, the in-cluster MinIO
-service, and public TCP 443/8000 while excluding private, loopback, link-local,
-benchmark, and multicast CIDRs. Orchestrator pods use
-`app=harbor-orchestrator`, so they retain the OpenShift API access needed to
-create and clean up task pods. If your cluster uses a different DNS or MinIO
-network topology, adjust the policy rather than removing it.
-
 The URL check runs before a job is queued and again immediately before its
 worker pod is created, covering DNS changes and private or link-local targets.
-The egress policy is the worker-side backstop. Managed Nebius endpoints are
-checked as public provider-generated addresses and use the explicitly allowed
-port 8000 rule.
+Managed Nebius endpoints are checked as public provider-generated addresses.
 
 For managed Nebius capacity, an approver can set `SERVER_URL` to an explicit
 resource token such as `nebius-h200` (or `nebius-b200x8`). The queue service
