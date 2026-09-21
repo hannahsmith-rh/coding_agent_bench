@@ -1,6 +1,6 @@
 # Add a New Model
 
-This will walk you through the process of adding a new model to the project.
+This will walk you through the two step process of adding a new model to the project: first validating the model and then registering it.
 
 ## Validate a New Model
 
@@ -124,7 +124,9 @@ VLLM_SERVER_PUBLIC_URL=http://$PUBLIC_IP_ADDRESS:8000
 echo "The vLLM server is located at $VLLM_SERVER_PUBLIC_URL"
 ```
 
-## Step 7: Register the Model in `coding_agent_bench`
+## Register the Model in `coding_agent_bench`
+
+Once the model has been validated, it can be added to `coding_agent_bench` to be used in benchmark runs on managed Nebius instances.
 
 First, add a new child class of `ModelConfig` with the model-specific arguments to `src/coding_agent_bench/models/configs.py`.
 
