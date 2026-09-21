@@ -66,7 +66,7 @@ EOF
 ```shell
 export INSTANCE_NAME=<name-of-instance>
 export SA_ID=<your-sa-id>
-export PROJECT_ID=project-u00p7j9jpr0009z22pqte7
+export PROJECT_ID=project-i00hz9y8pr00mf5rzvw82k
 
 # Check if the instance already exists
 nebius compute instance get-by-name --name $INSTANCE_NAME
@@ -76,9 +76,9 @@ nebius compute v1 instance create \
   --parent-id $PROJECT_ID \
   --name $INSTANCE_NAME \
   --service-account-id $SA_ID \
-  --resources-platform gpu-b200-sxm \
+  --resources-platform gpu-b200-sxm-a \
   --resources-preset 1gpu-20vcpu-224gb \
-  --network-interfaces '[{"subnetId":"vpcsubnet-u00yaswenkc5vmy3fx","name":"eth0","ipAddress":{},"publicIpAddress":{}}]' \
+  --network-interfaces '[{"subnetId":"vpcsubnet-i00y73e2kyyjze510h","name":"eth0","ipAddress":{},"publicIpAddress":{}}]' \
   --boot-disk-attach-mode read_write \
   --boot-disk-managed-disk-name $INSTANCE_NAME-boot-disk \
   --boot-disk-managed-disk-size-bytes 1374389534720 \
