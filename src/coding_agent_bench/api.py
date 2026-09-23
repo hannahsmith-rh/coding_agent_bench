@@ -752,6 +752,8 @@ async def _delete_nebius_instance(job_id: str, instance_name: str) -> None:
                 await asyncio.sleep(CLEANUP_RETRY_INTERVAL_SECONDS)
 
     logger.error("Nebius cleanup exhausted for %s; advancing the queue", job_id)
+    # Let idle cleanup and GPU-config mismatch handling retry the deletion later.
+    await _nebius.mark_job_completed(instance_name)
 
 
 async def _restore_jobs() -> bool:

@@ -91,6 +91,31 @@ def test_nebius_cleanup_stops_after_retry_limit(monkeypatch):
     assert nebius.attempts == 2
 
 
+def test_nebius_job_cleanup_releases_busy_flag_after_retry_limit(monkeypatch):
+    from coding_agent_bench import api
+
+    disable_retry_delays(monkeypatch, api)
+
+    class Nebius:
+        delete_attempts = 0
+        completed = 0
+
+        async def delete_instance(self, _instance_name):
+            self.delete_attempts += 1
+            raise RuntimeError("unavailable")
+
+        async def mark_job_completed(self, _instance_name):
+            self.completed += 1
+
+    nebius = Nebius()
+    monkeypatch.setattr(api, "_nebius", nebius)
+
+    asyncio.run(api._delete_nebius_instance("job-1", "instance-1"))
+
+    assert nebius.delete_attempts == 2
+    assert nebius.completed == 1
+
+
 def test_run_job_stops_recovery_probe_after_retry_limit(monkeypatch):
     from coding_agent_bench import api
 

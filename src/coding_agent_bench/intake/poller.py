@@ -256,11 +256,11 @@ def _handle_inflight_row(
         sheets.update_cell(row_num, Column.STATUS, Status.RUNNING.value)
 
     elif api_status == "cancelled":
-        if current_status != Status.CANCELLED.value:
-            sheets.update_cell(row_num, Column.STATUS, Status.CANCELLED.value)
         error = job_data.get("error")
         if error and row[Column.ERROR].strip() != error:
             sheets.update_cell(row_num, Column.ERROR, error)
+        if current_status != Status.CANCELLED.value:
+            sheets.update_cell(row_num, Column.STATUS, Status.CANCELLED.value)
 
 
 def _validate_queue_url(api_base_url: str) -> None:

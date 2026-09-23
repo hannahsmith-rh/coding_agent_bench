@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from coding_agent_bench.intake.config import Column, Status
 from coding_agent_bench.intake.poller import (
@@ -236,6 +236,10 @@ def test_running_row_updated_to_cancelled(mock_httpx):
 
     sheets.update_cell.assert_any_call(1, Column.STATUS, Status.CANCELLED.value)
     sheets.update_cell.assert_any_call(1, Column.ERROR, "Cancelled by request")
+    calls = sheets.update_cell.call_args_list
+    assert calls.index(call(1, Column.ERROR, "Cancelled by request")) < calls.index(
+        call(1, Column.STATUS, Status.CANCELLED.value)
+    )
 
 
 @patch("coding_agent_bench.intake.poller.httpx")
