@@ -213,6 +213,32 @@ def test_running_row_updated_to_failed(mock_httpx, mock_email):
 
 
 @patch("coding_agent_bench.intake.poller.httpx")
+def test_running_row_updated_to_cancelled(mock_httpx):
+    """Do not leave a spreadsheet row running after queue cancellation."""
+    mock_response = MagicMock()
+    mock_response.json.return_value = {
+        "status": "cancelled",
+        "error": "Cancelled by request",
+    }
+    mock_httpx.get.return_value = mock_response
+
+    sheets = MagicMock()
+    sheets.get_all_rows.return_value = [
+        _make_row(STATUS=Status.RUNNING.value, JOB_ID="uuid-123"),
+    ]
+
+    process_rows(
+        sheets=sheets,
+        api_base_url="http://job-queue-service",
+        api_key="test-key",
+        sender_email="bench@example.com",
+    )
+
+    sheets.update_cell.assert_any_call(1, Column.STATUS, Status.CANCELLED.value)
+    sheets.update_cell.assert_any_call(1, Column.ERROR, "Cancelled by request")
+
+
+@patch("coding_agent_bench.intake.poller.httpx")
 def test_already_completed_row_is_skipped(mock_httpx):
     """Skip a completed row after its terminal notification was recorded."""
     sheets = MagicMock()

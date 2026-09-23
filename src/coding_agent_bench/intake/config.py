@@ -34,6 +34,7 @@ class Status(str, Enum):
     RUNNING = "Running"
     COMPLETED = "Completed"
     FAILED = "Failed"
+    CANCELLED = "Cancelled"
     NEEDS_REVIEW = "Needs Review"
 
 

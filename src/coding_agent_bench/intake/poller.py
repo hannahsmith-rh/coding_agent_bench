@@ -22,7 +22,12 @@ from coding_agent_bench.intake.validation import validate_row
 
 logger = logging.getLogger(__name__)
 
-TERMINAL_STATUSES = {Status.COMPLETED.value, Status.FAILED.value, Status.NEEDS_REVIEW.value}
+TERMINAL_STATUSES = {
+    Status.COMPLETED.value,
+    Status.FAILED.value,
+    Status.CANCELLED.value,
+    Status.NEEDS_REVIEW.value,
+}
 
 
 def _auto_approve_enabled() -> bool:
@@ -249,6 +254,13 @@ def _handle_inflight_row(
 
     elif api_status == "running" and current_status != Status.RUNNING.value:
         sheets.update_cell(row_num, Column.STATUS, Status.RUNNING.value)
+
+    elif api_status == "cancelled":
+        if current_status != Status.CANCELLED.value:
+            sheets.update_cell(row_num, Column.STATUS, Status.CANCELLED.value)
+        error = job_data.get("error")
+        if error and row[Column.ERROR].strip() != error:
+            sheets.update_cell(row_num, Column.ERROR, error)
 
 
 def _validate_queue_url(api_base_url: str) -> None:

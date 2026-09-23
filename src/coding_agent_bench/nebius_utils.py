@@ -190,7 +190,7 @@ class NebiusInstanceManager:
         await self.exec(args)
 
     async def get_instance(self, instance_name: str):
-        """Get details about a running instance."""
+        """Get details about an instance."""
         args = [
             "compute", "instance", "get-by-name",
             "--name", instance_name,
@@ -198,6 +198,20 @@ class NebiusInstanceManager:
         ]
         stdout = await self.exec(args)
         return json.loads(stdout)
+
+    async def get_instance_state(self, instance_name: str) -> str:
+        """Return an instance state, treating a missing instance as deleted."""
+        try:
+            details = await self.get_instance(instance_name)
+        except Exception as e:
+            if "NotFound" in str(e):
+                return "DELETED"
+            raise
+
+        state = details.get("status", {}).get("state")
+        if not state:
+            raise ValueError(f"Instance {instance_name} has no state")
+        return state
 
     async def get_instance_ip_address(self, instance_name: str):
         """Get the IP address of a running instance."""

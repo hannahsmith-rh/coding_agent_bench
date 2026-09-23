@@ -47,6 +47,7 @@ def test_status_enum_values():
     assert Status.RUNNING.value == "Running"
     assert Status.COMPLETED.value == "Completed"
     assert Status.FAILED.value == "Failed"
+    assert Status.CANCELLED.value == "Cancelled"
     assert Status.NEEDS_REVIEW.value == "Needs Review"
 
 

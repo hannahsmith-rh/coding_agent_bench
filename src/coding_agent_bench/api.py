@@ -8,7 +8,7 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -99,8 +99,23 @@ class JobStatus(str, Enum):
 
 
 NEBIUS_IDLE_TIMEOUT = int(os.environ.get("NEBIUS_IDLE_TIMEOUT_SECONDS", "600"))
+NEBIUS_HEALTH_CHECK_INTERVAL_SECONDS = float(
+    os.environ.get("NEBIUS_HEALTH_CHECK_INTERVAL_SECONDS", "5")
+)
 CLEANUP_MAX_ATTEMPTS = int(os.environ.get("CLEANUP_MAX_ATTEMPTS", "120"))
 CLEANUP_RETRY_INTERVAL_SECONDS = float(os.environ.get("CLEANUP_RETRY_INTERVAL_SECONDS", "5"))
+
+NEBIUS_UNAVAILABLE_STATES = frozenset({
+    "STOPPING",
+    "STOPPED",
+    "CRASHED",
+    "ERROR",
+    "DELETED",
+})
+
+
+class NebiusInstanceUnavailable(RuntimeError):
+    """Raised when a managed Nebius instance can no longer serve a job."""
 
 
 @dataclass
@@ -232,6 +247,21 @@ class NebiusOrchestrator:
             return
         state.job_running = False
         state.last_job_completed_at = time.time()
+
+    async def get_instance_state(self, instance_name: str) -> str:
+        """Return the provider's current state for a tracked instance."""
+        return await self._manager.get_instance_state(instance_name)
+
+    async def delete_instance(self, instance_name: str) -> None:
+        """Delete a tracked instance and remove it from the in-memory pool."""
+        async with self._lock:
+            try:
+                await self._manager.delete_instance(instance_name)
+            except ValueError as e:
+                if "not found" not in str(e).lower():
+                    raise
+                logger.info("Nebius instance %s was already deleted", instance_name)
+            self._instances.pop(instance_name, None)
 
     async def adopt_running_instance(self, model_name: str, gpu_config: str) -> str:
         """Restore tracking for the deterministic instance used by a running job."""
@@ -702,6 +732,28 @@ async def _delete_recovered_nebius(job_id: str) -> None:
     logger.error(f"Nebius cleanup exhausted for {job_id}; advancing recovery")
 
 
+async def _delete_nebius_instance(job_id: str, instance_name: str) -> None:
+    """Retry deletion of an instance that failed while serving a job."""
+    assert _nebius is not None
+    for attempt in range(1, CLEANUP_MAX_ATTEMPTS + 1):
+        try:
+            await _nebius.delete_instance(instance_name)
+            return
+        except Exception:
+            logger.exception(
+                "Unable to delete Nebius instance %s for %s "
+                "(attempt %s/%s)",
+                instance_name,
+                job_id,
+                attempt,
+                CLEANUP_MAX_ATTEMPTS,
+            )
+            if attempt < CLEANUP_MAX_ATTEMPTS:
+                await asyncio.sleep(CLEANUP_RETRY_INTERVAL_SECONDS)
+
+    logger.error("Nebius cleanup exhausted for %s; advancing the queue", job_id)
+
+
 async def _restore_jobs() -> bool:
     """Rebuild the dispatcher without making startup depend on OpenShift."""
     _job_event.clear()
@@ -721,6 +773,72 @@ async def _restore_jobs() -> bool:
         _job_event.set()
     return has_recoverable_nebius
 
+
+async def _watch_nebius_instance(
+    instance_name: str,
+    failure_event: asyncio.Event,
+    failure_reason: list[str],
+) -> None:
+    """Signal when a managed instance can no longer serve its job."""
+    assert _nebius is not None
+    while True:
+        try:
+            state = await _nebius.get_instance_state(instance_name)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # A transient provider/API error should not fail a healthy job.
+            logger.exception(
+                "Unable to inspect Nebius instance %s; health check will retry",
+                instance_name,
+            )
+        else:
+            if state in NEBIUS_UNAVAILABLE_STATES:
+                failure_reason.append(
+                    f"Nebius instance {instance_name} became unavailable "
+                    f"(state={state})"
+                )
+                failure_event.set()
+                return
+
+        await asyncio.sleep(NEBIUS_HEALTH_CHECK_INTERVAL_SECONDS)
+
+
+async def _wait_for_job_pod_ready_or_nebius_failure(
+    oj: OpenshiftJob,
+    failure_event: asyncio.Event,
+    failure_reason: list[str],
+) -> None:
+    """Wait for the worker pod, but stop promptly if Nebius disappears."""
+    ready_task = asyncio.create_task(oj._wait_for_job_pod_ready())
+    failure_task = asyncio.create_task(failure_event.wait())
+    try:
+        done, _ = await asyncio.wait(
+            {ready_task, failure_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if failure_task in done and failure_event.is_set():
+            ready_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await ready_task
+            reason = failure_reason[0] if failure_reason else (
+                "Nebius instance became unavailable"
+            )
+            raise NebiusInstanceUnavailable(reason)
+
+        await ready_task
+        if failure_event.is_set():
+            reason = failure_reason[0] if failure_reason else (
+                "Nebius instance became unavailable"
+            )
+            raise NebiusInstanceUnavailable(reason)
+    finally:
+        if not failure_task.done():
+            failure_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await failure_task
+
+
 async def _run_job(
     job_id: str,
     command: list[str],
@@ -728,6 +846,7 @@ async def _run_job(
     managed_endpoint: bool = False,
     openrouter: bool = False,
     adopt_existing: bool = False,
+    nebius_instance_name: str | None = None,
 ):
     """Validate, run, and monitor an OpenShift Job."""
     if server_url:
@@ -744,6 +863,18 @@ async def _run_job(
             return
 
     oj = OpenshiftJob(job_name=job_id, clean_legacy_pods=adopt_existing)
+    failure_event: asyncio.Event | None = None
+    failure_reason: list[str] = []
+    health_task: asyncio.Task | None = None
+    if nebius_instance_name and _nebius is not None:
+        failure_event = asyncio.Event()
+        health_task = asyncio.create_task(
+            _watch_nebius_instance(
+                nebius_instance_name,
+                failure_event,
+                failure_reason,
+            )
+        )
 
     try:
         if not adopt_existing:
@@ -757,7 +888,12 @@ async def _run_job(
                 stdin_data=json.dumps(job_spec).encode(),
             )
             job_store.update_status(job_id, JobStatus.RUNNING)
-            await oj._wait_for_job_pod_ready()
+            if failure_event is None:
+                await oj._wait_for_job_pod_ready()
+            else:
+                await _wait_for_job_pod_ready_or_nebius_failure(
+                    oj, failure_event, failure_reason
+                )
         else:
             if job_store.get(job_id)["status"] == JobStatus.QUEUED.value:
                 job_store.update_status(job_id, JobStatus.RUNNING)
@@ -779,16 +915,31 @@ async def _run_job(
                 if condition.get("status") == "True"
             }
             if not conditions.intersection({"Complete", "Failed"}):
-                await oj._wait_for_job_pod_ready()
+                if failure_event is None:
+                    await oj._wait_for_job_pod_ready()
+                else:
+                    await _wait_for_job_pod_ready_or_nebius_failure(
+                        oj, failure_event, failure_reason
+                    )
 
         consecutive_missing = 0
         max_missing = 6  # 6 polls × 5s = 30s before declaring pod gone
 
         while True:
+            if failure_event is not None and failure_event.is_set():
+                reason = failure_reason[0] if failure_reason else (
+                    "Nebius instance became unavailable"
+                )
+                raise NebiusInstanceUnavailable(reason)
             try:
                 job = await oj._get_job()
             except Exception:
                 logger.exception(f"Unable to query OpenShift Job for {job_id}; monitoring will retry")
+                if failure_event is not None and failure_event.is_set():
+                    reason = failure_reason[0] if failure_reason else (
+                        "Nebius instance became unavailable"
+                    )
+                    raise NebiusInstanceUnavailable(reason)
                 await asyncio.sleep(5)
                 continue
             if job is None:
@@ -800,7 +951,7 @@ async def _run_job(
                         JobStatus.FAILED,
                         error="OpenShift Job vanished (likely deleted externally)",
                     )
-                    return
+                    return False
                 await asyncio.sleep(5)
                 continue
 
@@ -812,14 +963,18 @@ async def _run_job(
             }
             if "Complete" in conditions:
                 await _retry_terminal_job(job_id, oj, JobStatus.COMPLETED)
-                return
+                return False
             if "Failed" in conditions:
                 reason = conditions["Failed"].get("reason", "")
                 message = conditions["Failed"].get("message", "")
                 error = f"Failed: reason={reason}, message={message}"
                 await _retry_terminal_job(job_id, oj, JobStatus.FAILED, error=error)
-                return
+                return False
             await asyncio.sleep(5)
+
+    except NebiusInstanceUnavailable as e:
+        await _retry_terminal_job(job_id, oj, JobStatus.FAILED, error=str(e))
+        return True
 
     except asyncio.CancelledError:
         if _shutting_down:
@@ -830,6 +985,13 @@ async def _run_job(
     except Exception as e:
         error = str(e)
         await _retry_terminal_job(job_id, oj, JobStatus.FAILED, error=error)
+        return False
+
+    finally:
+        if health_task is not None:
+            health_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await health_task
 
 
 def _reorder_queue_for_nebius():
@@ -964,20 +1126,24 @@ async def _process_queued_job(queued: QueuedJob) -> None:
         if "--model-max-len" not in command and model_config is not None:
             command += ["--model-max-len", str(model_config.model_max_len)]
 
-        await _run_job(
+        nebius_failure = await _run_job(
             job_id,
             command,
             server_url=None if adopt_existing else job_server_url,
             managed_endpoint=managed_endpoint,
             openrouter=is_openrouter(server_url),
             adopt_existing=adopt_existing,
+            nebius_instance_name=nebius_instance_name,
         )
 
         if job_store.get(job_id)["status"] == JobStatus.CANCELLING.value:
             await _retry_cancellation(job_id, oj)
 
         if nebius_instance_name and _nebius:
-            await _nebius.mark_job_completed(nebius_instance_name)
+            if nebius_failure:
+                await _delete_nebius_instance(job_id, nebius_instance_name)
+            else:
+                await _nebius.mark_job_completed(nebius_instance_name)
     except asyncio.CancelledError:
         if _shutting_down:
             raise
