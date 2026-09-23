@@ -242,6 +242,42 @@ def test_running_row_updated_to_cancelled(mock_httpx):
     )
 
 
+@patch("coding_agent_bench.intake.poller.send_failed_email")
+@patch("coding_agent_bench.intake.poller.httpx")
+def test_running_row_updated_to_preempted(mock_httpx, mock_email):
+    """Record preemption separately so the job can be resumed later."""
+    mock_response = MagicMock()
+    mock_response.json.return_value = {
+        "status": "preempted",
+        "error": "Nebius instance worker-0 was preempted (state=STOPPED)",
+    }
+    mock_httpx.get.return_value = mock_response
+
+    sheets = MagicMock()
+    sheets.get_all_rows.return_value = [
+        _make_row(STATUS=Status.RUNNING.value, JOB_ID="uuid-123"),
+    ]
+
+    process_rows(
+        sheets=sheets,
+        api_base_url="http://job-queue-service",
+        api_key="test-key",
+        sender_email="bench@example.com",
+    )
+
+    sheets.update_cell.assert_any_call(
+        1,
+        Column.ERROR,
+        "Nebius instance worker-0 was preempted (state=STOPPED)",
+    )
+    sheets.update_cell.assert_any_call(1, Column.STATUS, Status.PREEMPTED.value)
+    calls = sheets.update_cell.call_args_list
+    assert calls.index(
+        call(1, Column.ERROR, "Nebius instance worker-0 was preempted (state=STOPPED)")
+    ) < calls.index(call(1, Column.STATUS, Status.PREEMPTED.value))
+    mock_email.assert_called_once()
+
+
 @patch("coding_agent_bench.intake.poller.httpx")
 def test_already_completed_row_is_skipped(mock_httpx):
     """Skip a completed row after its terminal notification was recorded."""

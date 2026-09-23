@@ -94,6 +94,7 @@ class JobStatus(str, Enum):
     COMPLETED = "completed"
     FAILING = "failing"
     FAILED = "failed"
+    PREEMPTED = "preempted"
     CANCELLING = "cancelling"
     CANCELLED = "cancelled"
 
@@ -108,14 +109,20 @@ CLEANUP_RETRY_INTERVAL_SECONDS = float(os.environ.get("CLEANUP_RETRY_INTERVAL_SE
 NEBIUS_UNAVAILABLE_STATES = frozenset({
     "STOPPING",
     "STOPPED",
+    "PREEMPTED",
     "CRASHED",
     "ERROR",
     "DELETED",
 })
+NEBIUS_PREEMPTED_STATES = frozenset({"STOPPED", "PREEMPTED"})
 
 
 class NebiusInstanceUnavailable(RuntimeError):
     """Raised when a managed Nebius instance can no longer serve a job."""
+
+    def __init__(self, reason: str, state: str | None = None):
+        super().__init__(reason)
+        self.state = state
 
 
 @dataclass
@@ -780,6 +787,7 @@ async def _watch_nebius_instance(
     instance_name: str,
     failure_event: asyncio.Event,
     failure_reason: list[str],
+    failure_state: list[str],
 ) -> None:
     """Signal when a managed instance can no longer serve its job."""
     assert _nebius is not None
@@ -796,10 +804,17 @@ async def _watch_nebius_instance(
             )
         else:
             if state in NEBIUS_UNAVAILABLE_STATES:
-                failure_reason.append(
-                    f"Nebius instance {instance_name} became unavailable "
-                    f"(state={state})"
-                )
+                failure_state.append(state)
+                if state in NEBIUS_PREEMPTED_STATES:
+                    failure_reason.append(
+                        f"Nebius instance {instance_name} was preempted "
+                        f"(state={state})"
+                    )
+                else:
+                    failure_reason.append(
+                        f"Nebius instance {instance_name} became unavailable "
+                        f"(state={state})"
+                    )
                 failure_event.set()
                 return
 
@@ -810,6 +825,7 @@ async def _wait_for_job_pod_ready_or_nebius_failure(
     oj: OpenshiftJob,
     failure_event: asyncio.Event,
     failure_reason: list[str],
+    failure_state: list[str],
 ) -> None:
     """Wait for the worker pod, but stop promptly if Nebius disappears."""
     ready_task = asyncio.create_task(oj._wait_for_job_pod_ready())
@@ -826,14 +842,16 @@ async def _wait_for_job_pod_ready_or_nebius_failure(
             reason = failure_reason[0] if failure_reason else (
                 "Nebius instance became unavailable"
             )
-            raise NebiusInstanceUnavailable(reason)
+            state = failure_state[0] if failure_state else None
+            raise NebiusInstanceUnavailable(reason, state=state)
 
         await ready_task
         if failure_event.is_set():
             reason = failure_reason[0] if failure_reason else (
                 "Nebius instance became unavailable"
             )
-            raise NebiusInstanceUnavailable(reason)
+            state = failure_state[0] if failure_state else None
+            raise NebiusInstanceUnavailable(reason, state=state)
     finally:
         if not failure_task.done():
             failure_task.cancel()
@@ -867,6 +885,7 @@ async def _run_job(
     oj = OpenshiftJob(job_name=job_id, clean_legacy_pods=adopt_existing)
     failure_event: asyncio.Event | None = None
     failure_reason: list[str] = []
+    failure_state: list[str] = []
     health_task: asyncio.Task | None = None
     if nebius_instance_name and _nebius is not None:
         failure_event = asyncio.Event()
@@ -875,6 +894,7 @@ async def _run_job(
                 nebius_instance_name,
                 failure_event,
                 failure_reason,
+                failure_state,
             )
         )
 
@@ -894,7 +914,7 @@ async def _run_job(
                 await oj._wait_for_job_pod_ready()
             else:
                 await _wait_for_job_pod_ready_or_nebius_failure(
-                    oj, failure_event, failure_reason
+                    oj, failure_event, failure_reason, failure_state
                 )
         else:
             if job_store.get(job_id)["status"] == JobStatus.QUEUED.value:
@@ -921,7 +941,7 @@ async def _run_job(
                     await oj._wait_for_job_pod_ready()
                 else:
                     await _wait_for_job_pod_ready_or_nebius_failure(
-                        oj, failure_event, failure_reason
+                        oj, failure_event, failure_reason, failure_state
                     )
 
         consecutive_missing = 0
@@ -932,7 +952,8 @@ async def _run_job(
                 reason = failure_reason[0] if failure_reason else (
                     "Nebius instance became unavailable"
                 )
-                raise NebiusInstanceUnavailable(reason)
+                state = failure_state[0] if failure_state else None
+                raise NebiusInstanceUnavailable(reason, state=state)
             try:
                 job = await oj._get_job()
             except Exception:
@@ -941,7 +962,8 @@ async def _run_job(
                     reason = failure_reason[0] if failure_reason else (
                         "Nebius instance became unavailable"
                     )
-                    raise NebiusInstanceUnavailable(reason)
+                    state = failure_state[0] if failure_state else None
+                    raise NebiusInstanceUnavailable(reason, state=state)
                 await asyncio.sleep(5)
                 continue
             if job is None:
@@ -975,7 +997,12 @@ async def _run_job(
             await asyncio.sleep(5)
 
     except NebiusInstanceUnavailable as e:
-        await _retry_terminal_job(job_id, oj, JobStatus.FAILED, error=str(e))
+        status = (
+            JobStatus.PREEMPTED
+            if e.state in NEBIUS_PREEMPTED_STATES
+            else JobStatus.FAILED
+        )
+        await _retry_terminal_job(job_id, oj, status, error=str(e))
         return True
 
     except asyncio.CancelledError:
@@ -1224,7 +1251,12 @@ async def ui():
         + job_store.list(JobStatus.CANCELLING)
     )
     queued = job_store.list(JobStatus.QUEUED)
-    completed = job_store.list(JobStatus.COMPLETED) + job_store.list(JobStatus.FAILED) + job_store.list(JobStatus.CANCELLED)
+    completed = (
+        job_store.list(JobStatus.COMPLETED)
+        + job_store.list(JobStatus.FAILED)
+        + job_store.list(JobStatus.PREEMPTED)
+        + job_store.list(JobStatus.CANCELLED)
+    )
     completed.reverse()
 
     # Build Nebius instances section if enabled
@@ -1519,6 +1551,7 @@ async def delete_job(job_id: str):
         JobStatus.COMPLETED,
         JobStatus.FAILING,
         JobStatus.FAILED,
+        JobStatus.PREEMPTED,
         JobStatus.CANCELLED,
     ):
         raise HTTPException(status_code=400, detail=f"Job already {job_row['status']}")
@@ -1615,14 +1648,18 @@ def _build_parent_env_shell_step(py_job_dir: str) -> str:
 
 @router.post("/jobs/{job_id}/resume")
 async def resume_job(job_id: str, req: ResumeJobRequest = ResumeJobRequest()):
-    """Resume a completed/failed job by retrying errored tasks via harbor jobs resume."""
+    """Resume a completed, failed, or preempted job via harbor jobs resume."""
     job_row = job_store.get(job_id)
     if not job_row:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job_row["status"] not in (JobStatus.COMPLETED.value, JobStatus.FAILED.value):
+    if job_row["status"] not in (
+        JobStatus.COMPLETED.value,
+        JobStatus.FAILED.value,
+        JobStatus.PREEMPTED.value,
+    ):
         raise HTTPException(
             status_code=400,
-            detail=f"Can only resume completed/failed jobs, got {job_row['status']}",
+            detail=f"Can only resume completed/failed/preempted jobs, got {job_row['status']}",
         )
 
     original_job_name = job_row["job_name"]

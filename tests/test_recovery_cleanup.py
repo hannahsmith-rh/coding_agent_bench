@@ -147,7 +147,7 @@ def test_run_job_stops_recovery_probe_after_retry_limit(monkeypatch):
     assert terminal_errors == ["unavailable"]
 
 
-def test_run_job_fails_when_nebius_instance_stops(monkeypatch):
+def test_run_job_marks_nebius_preemption(monkeypatch):
     from coding_agent_bench import api
 
     store = FakeJobStore(api.JobStatus.RUNNING)
@@ -189,8 +189,8 @@ def test_run_job_fails_when_nebius_instance_stops(monkeypatch):
     assert result is True
     assert terminal_errors == [
         (
-            api.JobStatus.FAILED,
-            "Nebius instance instance-1 became unavailable (state=STOPPED)",
+            api.JobStatus.PREEMPTED,
+            "Nebius instance instance-1 was preempted (state=STOPPED)",
         )
     ]
 

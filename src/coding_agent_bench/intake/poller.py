@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 TERMINAL_STATUSES = {
     Status.COMPLETED.value,
     Status.FAILED.value,
+    Status.PREEMPTED.value,
     Status.CANCELLED.value,
     Status.NEEDS_REVIEW.value,
 }
@@ -123,9 +124,13 @@ def process_rows(
             status = row[Column.STATUS].strip()
 
             if status in TERMINAL_STATUSES:
-                # Completed/failed rows remain eligible for one retry when the
+                # Completed/failed/preempted rows remain eligible for one retry when the
                 # queue state was persisted but the notification was not.
-                if status in (Status.COMPLETED.value, Status.FAILED.value) and (
+                if status in (
+                    Status.COMPLETED.value,
+                    Status.FAILED.value,
+                    Status.PREEMPTED.value,
+                ) and (
                     row[Column.NOTIFIED_DONE].strip().upper() != "TRUE"
                 ):
                     _handle_inflight_row(
@@ -239,12 +244,16 @@ def _handle_inflight_row(
             except Exception:
                 logger.exception("Failed to send completed email for row %d", row_num)
 
-    elif api_status == "failed":
-        error = job_data.get("error") or "Unknown error"
-        if current_status != Status.FAILED.value:
-            sheets.update_cell(row_num, Column.STATUS, Status.FAILED.value)
+    elif api_status in ("failed", "preempted"):
+        is_preempted = api_status == "preempted"
+        error = job_data.get("error") or (
+            "Nebius instance was preempted" if is_preempted else "Unknown error"
+        )
+        target_status = Status.PREEMPTED.value if is_preempted else Status.FAILED.value
         if row[Column.ERROR].strip() != error:
             sheets.update_cell(row_num, Column.ERROR, error)
+        if current_status != target_status:
+            sheets.update_cell(row_num, Column.STATUS, target_status)
         if not notified_done:
             try:
                 send_failed_email(email, job_id, error, sender_email)

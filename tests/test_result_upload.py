@@ -103,16 +103,29 @@ def queue_api(tmp_path, monkeypatch):
     return api
 
 
-def enqueue_resume(api, server_url="https://old.models.example.com", new_url=None):
-    """Build a real resume command for a failed job."""
+def enqueue_resume(
+    api,
+    server_url="https://old.models.example.com",
+    new_url=None,
+    status=None,
+):
+    """Build a real resume command for a terminal job."""
     api.job_store.insert(
         "original", "job with spaces", "codex", "dataset", "model", server_url, []
     )
-    api.job_store.update_status("original", api.JobStatus.FAILED)
+    api.job_store.update_status("original", status or api.JobStatus.FAILED)
     asyncio.run(
         api.resume_job("original", api.ResumeJobRequest(server_url=new_url))
     )
     return api._job_queue[-1]
+
+
+def test_preempted_job_can_be_resumed(queue_api):
+    """Allow an interrupted Nebius job to be resumed later."""
+    queued = enqueue_resume(queue_api, status=queue_api.JobStatus.PREEMPTED)
+
+    assert queued.job_id != "original"
+    assert queued.command[0:2] == ["bash", "-c"]
 
 
 @pytest.mark.parametrize("harbor_rc", [0, 1, 143])
